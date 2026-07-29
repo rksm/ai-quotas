@@ -438,7 +438,9 @@ mod tests {
         metrics
             .iter()
             .map(|metric| match metric {
-                Metric::Window { label, .. } | Metric::Balance { label, .. } => label.as_str(),
+                Metric::Window { label, .. }
+                | Metric::Balance { label, .. }
+                | Metric::Cost { label, .. } => label.as_str(),
             })
             .collect()
     }

@@ -72,6 +72,7 @@ impl Thresholds {
                     Level::Ok
                 }
             }
+            Metric::Cost { .. } => Level::Ok,
         };
 
         EvaluatedMetric { metric, level }
@@ -93,6 +94,11 @@ pub enum Metric {
         currency: String,
         used: Option<f64>,
         limit: Option<f64>,
+    },
+    Cost {
+        label: String,
+        amount: f64,
+        currency: String,
     },
 }
 
@@ -149,6 +155,17 @@ mod tests {
             thresholds.evaluate(balance(10.0, Some(100.0))).level,
             Level::Ok
         );
+    }
+
+    #[test]
+    fn leaves_costs_unthresholded() {
+        let metric = Metric::Cost {
+            label: "month-spend".to_owned(),
+            amount: 42.0,
+            currency: "USD".to_owned(),
+        };
+
+        assert_eq!(Thresholds::default().evaluate(metric).level, Level::Ok);
     }
 
     fn window(used_percent: f64) -> Metric {

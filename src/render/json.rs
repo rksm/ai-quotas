@@ -84,6 +84,12 @@ enum MetricOutput<'a> {
         limit: Option<f64>,
         level: Level,
     },
+    Cost {
+        label: &'a str,
+        amount: f64,
+        currency: &'a str,
+        level: Level,
+    },
 }
 
 impl<'a> From<&'a EvaluatedMetric> for MetricOutput<'a> {
@@ -115,6 +121,16 @@ impl<'a> From<&'a EvaluatedMetric> for MetricOutput<'a> {
                 currency,
                 used: *used,
                 limit: *limit,
+                level: evaluated.level,
+            },
+            Metric::Cost {
+                label,
+                amount,
+                currency,
+            } => Self::Cost {
+                label,
+                amount: *amount,
+                currency,
                 level: evaluated.level,
             },
         }
@@ -204,27 +220,44 @@ mod tests {
     }
 
     #[test]
-    fn emits_balance_raw_values_and_compact_jsonl_records() {
+    fn emits_balance_and_cost_values_in_compact_jsonl_records() {
         let generated_at = DateTime::parse_from_rfc3339("2026-07-29T14:32:07Z").unwrap();
         let dashboard = Dashboard {
             generated_at,
-            entries: vec![AccountSnapshot {
-                service: Service::Elevenlabs,
-                account: "main".to_owned(),
-                status: AccountStatus::Stale,
-                error: Some("rate limited".to_owned()),
-                metrics: vec![EvaluatedMetric {
-                    metric: Metric::Balance {
-                        label: "credits".to_owned(),
-                        amount: 81_203.0,
-                        currency: "credits".to_owned(),
-                        used: Some(18_797.0),
-                        limit: Some(100_000.0),
-                    },
-                    level: Level::Ok,
-                }],
-                updated_at: Some(generated_at),
-            }],
+            entries: vec![
+                AccountSnapshot {
+                    service: Service::Elevenlabs,
+                    account: "main".to_owned(),
+                    status: AccountStatus::Stale,
+                    error: Some("rate limited".to_owned()),
+                    metrics: vec![EvaluatedMetric {
+                        metric: Metric::Balance {
+                            label: "credits".to_owned(),
+                            amount: 81_203.0,
+                            currency: "credits".to_owned(),
+                            used: Some(18_797.0),
+                            limit: Some(100_000.0),
+                        },
+                        level: Level::Ok,
+                    }],
+                    updated_at: Some(generated_at),
+                },
+                AccountSnapshot {
+                    service: Service::OpenaiApi,
+                    account: "main".to_owned(),
+                    status: AccountStatus::Ok,
+                    error: None,
+                    metrics: vec![EvaluatedMetric {
+                        metric: Metric::Cost {
+                            label: "month-spend".to_owned(),
+                            amount: 7.25,
+                            currency: "USD".to_owned(),
+                        },
+                        level: Level::Ok,
+                    }],
+                    updated_at: Some(generated_at),
+                },
+            ],
         };
 
         let output = render(&dashboard, false).unwrap();
@@ -234,5 +267,7 @@ mod tests {
         assert!(output.contains(r#""amount":81203.0"#));
         assert!(output.contains(r#""used":18797.0"#));
         assert!(output.contains(r#""limit":100000.0"#));
+        assert!(output.contains(r#""kind":"cost""#));
+        assert!(output.contains(r#""amount":7.25"#));
     }
 }

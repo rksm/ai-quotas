@@ -120,6 +120,14 @@ where
             };
             format!("  {label:<12} {value} remaining")
         }
+        Metric::Cost {
+            label,
+            amount,
+            currency,
+        } => format!(
+            "  {label:<12} {} spent",
+            currency_amount(*amount, &display_text(currency))
+        ),
     }
 }
 
@@ -257,7 +265,7 @@ mod tests {
     use crate::model::{EvaluatedMetric, Level, Metric, Service};
 
     #[test]
-    fn renders_plain_quota_and_balance_blocks() {
+    fn renders_plain_quota_balance_and_cost_blocks() {
         let generated_at = DateTime::parse_from_rfc3339("2026-07-29T11:50:00+02:00").unwrap();
         let dashboard = Dashboard {
             generated_at,
@@ -297,6 +305,21 @@ mod tests {
                     }],
                     updated_at: Some(generated_at),
                 },
+                AccountSnapshot {
+                    service: Service::OpenaiApi,
+                    account: "main".to_owned(),
+                    status: AccountStatus::Ok,
+                    error: None,
+                    metrics: vec![EvaluatedMetric {
+                        metric: Metric::Cost {
+                            label: "month-spend".to_owned(),
+                            amount: 7.25,
+                            currency: "USD".to_owned(),
+                        },
+                        level: Level::Ok,
+                    }],
+                    updated_at: Some(generated_at),
+                },
             ],
         };
 
@@ -311,6 +334,8 @@ claude-code  personal
   5h             42% ███░░░░░  resets 14:00 (in 2h 10m)
 deepgram     main
   balance      $1,102.10 remaining
+openai-api   main
+  month-spend  $7.25 spent
 "
         );
     }
