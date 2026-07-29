@@ -31,6 +31,7 @@ credential files. Restrict its filesystem permissions accordingly.
 | codex       | ~CODEX_ACCESS_TOKEN~                              | An ~at-~ personal access token. The CLI discovers its ChatGPT account ID. |
 | deepgram    | ~DEEPGRAM_API_KEY~                                | A project-scoped key with ~project:read~ and ~billing:read~. |
 | elevenlabs  | ~ELEVENLABS_API_KEY~                              | A key that can read the user subscription, normally with ~user_read~. |
+| runpod      | ~RUNPOD_API_KEY~                                  | A Runpod API key permitted to read GraphQL account data. |
 | openai-api  | ~OPENAI_API_KEY~                                  | OpenAI does not expose prepaid balance to ordinary API keys. This account reports a clear per-account error. |
 
 A Claude Code account must configure exactly one of ~env~ or

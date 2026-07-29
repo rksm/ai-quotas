@@ -33,6 +33,7 @@ Two kinds of metrics exist, and every provider returns a list of them:
 | openai-api  | 2        | prepaid balance                             |
 | deepgram    | 1        | prepaid balance                             |
 | elevenlabs  | 1        | credits remaining (count / limit)           |
+| runpod      | 1        | prepaid balance                             |
 
 Each provider fetches its full fixed metric set. There is no per-account
 metric selection in the config.
@@ -115,6 +116,11 @@ services:
       - name: main
         env:
           ELEVENLABS_API_KEY: ...
+  runpod:
+    accounts:
+      - name: main
+        env:
+          RUNPOD_API_KEY: ...
 #+END_SRC
 
 Threshold defaults: quotas turn yellow at 70% used and red at 90%. Balances
@@ -155,6 +161,8 @@ deepgram     main
   balance       $102.10 remaining
 elevenlabs   main
   credits       81,203 / 100,000 remaining
+runpod       main
+  balance       $435.85 remaining
 #+END_SRC
 
 - Usage bars plus percent for windowed quotas, plain amounts for balances.
