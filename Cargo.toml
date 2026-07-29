@@ -5,6 +5,12 @@ edition = "2024"
 description = "Monitor quotas and prepaid balances for AI services"
 license = "MIT"
 
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
 [lints.clippy]
 pedantic = "warn"
 
