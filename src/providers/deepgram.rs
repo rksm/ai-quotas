@@ -6,7 +6,7 @@ use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
 use super::{Provider, credential, environment, response_json};
-use crate::config::CredentialSource;
+use crate::config::AccountTarget;
 use crate::model::Metric;
 
 const BASE_URL: &str = "https://api.deepgram.com";
@@ -15,8 +15,8 @@ const TOKEN_VARIABLE: &str = "DEEPGRAM_API_KEY";
 pub(super) struct Deepgram;
 
 impl Provider for Deepgram {
-    async fn fetch(&self, client: &Client, credentials: &CredentialSource) -> Result<Vec<Metric>> {
-        fetch_from(client, environment(credentials)?, BASE_URL).await
+    async fn fetch(&self, client: &Client, account: &AccountTarget) -> Result<Vec<Metric>> {
+        fetch_from(client, environment(&account.credentials)?, BASE_URL).await
     }
 }
 

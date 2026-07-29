@@ -6,7 +6,7 @@ use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
 use super::{Provider, credential, environment, response_json};
-use crate::config::CredentialSource;
+use crate::config::AccountTarget;
 use crate::model::Metric;
 
 const API_URL: &str = "https://api.runpod.io/graphql";
@@ -16,8 +16,8 @@ const TOKEN_VARIABLE: &str = "RUNPOD_API_KEY";
 pub(super) struct Runpod;
 
 impl Provider for Runpod {
-    async fn fetch(&self, client: &Client, credentials: &CredentialSource) -> Result<Vec<Metric>> {
-        fetch_from(client, environment(credentials)?, API_URL).await
+    async fn fetch(&self, client: &Client, account: &AccountTarget) -> Result<Vec<Metric>> {
+        fetch_from(client, environment(&account.credentials)?, API_URL).await
     }
 }
 

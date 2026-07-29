@@ -10,7 +10,7 @@ use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
 use super::{Provider, USER_AGENT, credential, response_json};
-use crate::config::CredentialSource;
+use crate::config::{AccountTarget, CredentialSource};
 use crate::model::Metric;
 
 const BASE_URL: &str = "https://api.anthropic.com";
@@ -19,8 +19,8 @@ const TOKEN_VARIABLE: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 pub(super) struct ClaudeCode;
 
 impl Provider for ClaudeCode {
-    async fn fetch(&self, client: &Client, credentials: &CredentialSource) -> Result<Vec<Metric>> {
-        fetch_from(client, credentials, BASE_URL).await
+    async fn fetch(&self, client: &Client, account: &AccountTarget) -> Result<Vec<Metric>> {
+        fetch_from(client, &account.credentials, BASE_URL).await
     }
 }
 

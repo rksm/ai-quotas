@@ -11,13 +11,13 @@ use anyhow::{Context, Result, bail};
 use reqwest::{Client, Response, StatusCode};
 use serde::de::DeserializeOwned;
 
-use crate::config::CredentialSource;
+use crate::config::{AccountTarget, CredentialSource};
 use crate::model::{Metric, Service};
 
 const USER_AGENT: &str = concat!("ai-quotas/", env!("CARGO_PKG_VERSION"));
 
 trait Provider {
-    async fn fetch(&self, client: &Client, credentials: &CredentialSource) -> Result<Vec<Metric>>;
+    async fn fetch(&self, client: &Client, account: &AccountTarget) -> Result<Vec<Metric>>;
 }
 
 /// Fetch the fixed metric set for one configured service account.
@@ -26,18 +26,14 @@ trait Provider {
 ///
 /// Returns an error when credentials are missing, a request fails, or the
 /// provider returns an unusable response.
-pub async fn fetch(
-    service: Service,
-    client: &Client,
-    credentials: &CredentialSource,
-) -> Result<Vec<Metric>> {
-    match service {
-        Service::ClaudeCode => claude_code::ClaudeCode.fetch(client, credentials).await,
-        Service::Codex => codex::Codex.fetch(client, credentials).await,
-        Service::OpenaiApi => openai_api::OpenAiApi.fetch(client, credentials).await,
-        Service::Deepgram => deepgram::Deepgram.fetch(client, credentials).await,
-        Service::Elevenlabs => elevenlabs::ElevenLabs.fetch(client, credentials).await,
-        Service::Runpod => runpod::Runpod.fetch(client, credentials).await,
+pub async fn fetch(client: &Client, account: &AccountTarget) -> Result<Vec<Metric>> {
+    match account.service {
+        Service::ClaudeCode => claude_code::ClaudeCode.fetch(client, account).await,
+        Service::Codex => codex::Codex.fetch(client, account).await,
+        Service::OpenaiApi => openai_api::OpenAiApi.fetch(client, account).await,
+        Service::Deepgram => deepgram::Deepgram.fetch(client, account).await,
+        Service::Elevenlabs => elevenlabs::ElevenLabs.fetch(client, account).await,
+        Service::Runpod => runpod::Runpod.fetch(client, account).await,
     }
 }
 

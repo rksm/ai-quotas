@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, FixedOffset};
 use serde::Deserialize;
 
 use crate::model::{Service, Thresholds};
@@ -21,6 +22,7 @@ pub struct AccountTarget {
     pub service: Service,
     pub name: String,
     pub credentials: CredentialSource,
+    pub balance: Option<BalanceAnchor>,
     pub thresholds: Thresholds,
 }
 
@@ -29,12 +31,21 @@ pub enum CredentialSource {
     File(PathBuf),
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BalanceAnchor {
+    pub as_of: DateTime<FixedOffset>,
+    pub amount: f64,
+    pub currency: String,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccountConfig {
     pub name: String,
     pub env: Option<BTreeMap<String, String>>,
     pub credentials_file: Option<PathBuf>,
+    pub balance: Option<BalanceAnchor>,
 }
 
 #[derive(Deserialize)]
@@ -140,6 +151,7 @@ impl Config {
                     service,
                     name: account.name,
                     credentials,
+                    balance: account.balance,
                     thresholds: config.thresholds,
                 });
             }
@@ -211,8 +223,31 @@ fn validate_accounts(service: Service, accounts: &[AccountConfig]) -> Result<()>
                 );
             }
         }
+        validate_balance(service, &account.name, account.balance.as_ref())?;
     }
 
+    Ok(())
+}
+
+fn validate_balance(
+    service: Service,
+    account: &str,
+    balance: Option<&BalanceAnchor>,
+) -> Result<()> {
+    let Some(balance) = balance else {
+        return Ok(());
+    };
+    if service != Service::OpenaiApi {
+        bail!(
+            "services.{service}.accounts entry {account:?} uses balance, which is only supported by openai-api"
+        );
+    }
+    if !balance.amount.is_finite() {
+        bail!("services.{service}.accounts entry {account:?} has an invalid balance amount");
+    }
+    if balance.currency.trim().is_empty() {
+        bail!("services.{service}.accounts entry {account:?} has an empty balance currency");
+    }
     Ok(())
 }
 
@@ -450,6 +485,57 @@ services:
                 .to_string()
                 .contains("must be absolute or start with ~/")
         );
+    }
+
+    #[test]
+    fn parses_an_openai_balance_anchor() {
+        let targets = Config::from_yaml(
+            r#"
+services:
+  openai-api:
+    accounts:
+      - name: main
+        env:
+          OPENAI_ADMIN_KEY: secret
+        balance:
+          as_of: "2026-07-29T18:00:00+02:00"
+          amount: 20.5
+          currency: USD
+"#,
+        )
+        .unwrap()
+        .select(&[Service::OpenaiApi], &[])
+        .unwrap();
+
+        let balance = targets[0].balance.as_ref().unwrap();
+        assert_eq!(
+            balance.as_of,
+            chrono::DateTime::parse_from_rfc3339("2026-07-29T18:00:00+02:00").unwrap()
+        );
+        assert_close(balance.amount, 20.5);
+        assert_eq!(balance.currency, "USD");
+    }
+
+    #[test]
+    fn rejects_balance_anchors_for_other_services() {
+        let error = Config::from_yaml(
+            r#"
+services:
+  deepgram:
+    accounts:
+      - name: main
+        env:
+          DEEPGRAM_API_KEY: secret
+        balance:
+          as_of: "2026-07-29T18:00:00+02:00"
+          amount: 20.5
+          currency: USD
+"#,
+        )
+        .err()
+        .expect("unsupported balance should fail");
+
+        assert!(error.to_string().contains("only supported by openai-api"));
     }
 
     #[test]

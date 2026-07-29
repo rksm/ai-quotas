@@ -7,7 +7,7 @@ use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
 use super::{Provider, USER_AGENT, credential, environment, response_json};
-use crate::config::CredentialSource;
+use crate::config::AccountTarget;
 use crate::model::Metric;
 
 const BACKEND_URL: &str = "https://chatgpt.com";
@@ -20,8 +20,14 @@ const WEEK_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub(super) struct Codex;
 
 impl Provider for Codex {
-    async fn fetch(&self, client: &Client, credentials: &CredentialSource) -> Result<Vec<Metric>> {
-        fetch_from(client, environment(credentials)?, AUTH_URL, BACKEND_URL).await
+    async fn fetch(&self, client: &Client, account: &AccountTarget) -> Result<Vec<Metric>> {
+        fetch_from(
+            client,
+            environment(&account.credentials)?,
+            AUTH_URL,
+            BACKEND_URL,
+        )
+        .await
     }
 }
 

@@ -32,7 +32,7 @@ struct RemoteFetcher<'a> {
 
 impl Fetcher for RemoteFetcher<'_> {
     async fn fetch(&self, target: &AccountTarget) -> Result<Vec<Metric>> {
-        providers::fetch(target.service, self.client, &target.credentials).await
+        providers::fetch(self.client, target).await
     }
 }
 
@@ -128,6 +128,7 @@ mod tests {
             service: Service::Codex,
             name: name.to_owned(),
             credentials: CredentialSource::Env(BTreeMap::new()),
+            balance: None,
             thresholds: Thresholds::default(),
         }
     }

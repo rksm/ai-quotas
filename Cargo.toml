@@ -2,12 +2,12 @@
 name = "ai-quotas"
 version = "0.1.0"
 edition = "2024"
-description = "Monitor quotas and prepaid balances for AI services"
+description = "Monitor quotas, costs, and prepaid balances for AI services"
 license = "MIT"
 
 [dependencies]
 anyhow = "1.0"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
