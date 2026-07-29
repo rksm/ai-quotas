@@ -53,11 +53,23 @@ module.
 
 * Credentials
 
-Each account entry carries an ~env~ map with literal values. The provider
-either reads the variables directly (API calls) or injects them into the
-subprocess environment (CLI fallback). Secrets in the YAML are acceptable,
-the app has no secret store of its own. OAuth token expiry is reported as a
-clear per-account error, re-login happens outside the app.
+Each account entry chooses exactly one credential source:
+
+- ~env~ contains literal values. The provider either reads the variables
+  directly or injects them into a subprocess for a CLI fallback.
+- ~credentials_file~ is supported for Claude Code on Linux and Windows. It
+  names an absolute Claude Code ~.credentials.json~ path or one beginning
+  with =~/=. The provider reads ~claudeAiOauth.accessToken~ on every fetch.
+
+The app never caches, refreshes, or modifies a managed credential file.
+Claude Code owns refresh-token rotation, and the next run or watch interval
+picks up a newly written access token. OAuth expiry and malformed or missing
+files are isolated as clear per-account errors. On macOS, where Claude Code
+stores managed credentials in the Keychain, use the environment-token
+source.
+
+Secrets in YAML are acceptable because the app has no secret store of its
+own. Protect the config and every referenced credential file accordingly.
 
 * Configuration
 
@@ -75,11 +87,9 @@ services:
   claude-code:
     accounts:
       - name: personal
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: sk-ant-oat01-...
+        credentials_file: ~/.claude/.credentials.json
       - name: work
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: sk-ant-oat01-...
+        credentials_file: ~/.claude-work/.credentials.json
   codex:
     accounts:
       - name: main
@@ -213,8 +223,9 @@ Deliberately boring stack:
   per-fetch timeout
 - *serde / serde_yaml / serde_json*: config and output
 - *clap*: CLI surface
-- Provider trait ~fetch(account_env) -> Result<Vec<Metric>>~, one module per
-  service. The whole app is: read config, fan out fetches, render.
+- Provider trait ~fetch(account_credentials) -> Result<Vec<Metric>>~, one
+  module per service. The whole app is: read config, fan out fetches,
+  render.
 - Plain ANSI colors and manual table rendering, no TUI crate
 - Nix flake dev shell plus justfile (~just run~, ~just watch~, ~just test~)
 

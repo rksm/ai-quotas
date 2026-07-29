@@ -18,19 +18,29 @@ Without ~--config~, the CLI reads
 ~~/.config/ai-quotas/config.yaml~. See [[file:docs/IDEA.org][docs/IDEA.org]] for
 the complete configuration shape and command-line interface.
 
-The configuration contains literal credentials. Restrict its filesystem
-permissions accordingly.
+The configuration can contain literal credentials or paths to managed
+credential files. Restrict its filesystem permissions accordingly.
 
 * Credential requirements
 
-| Service     | Environment variable                              | Requirement |
+| Service     | Credential source                                 | Requirement |
 |-------------+---------------------------------------------------+-------------|
-| claude-code | ~CLAUDE_CODE_OAUTH_TOKEN~                         | A full OAuth access token with the ~user:profile~ scope. A ~claude setup-token~ token is normally inference-only and cannot read usage. |
+| claude-code | ~credentials_file~                                | Preferred on Linux and Windows. A Claude Code managed ~.credentials.json~ containing ~claudeAiOauth.accessToken~ with the ~user:profile~ scope. |
+| claude-code | ~env.CLAUDE_CODE_OAUTH_TOKEN~                     | A full OAuth access token with the ~user:profile~ scope. A ~claude setup-token~ token is normally inference-only and cannot read usage. |
 | codex       | ~CODEX_OAUTH_TOKEN~, optional ~CODEX_ACCOUNT_ID~  | The managed-login access token. Set the account ID for reliable routing when the login belongs to multiple workspaces. |
 | codex       | ~CODEX_ACCESS_TOKEN~                              | An ~at-~ personal access token. The CLI discovers its ChatGPT account ID. |
 | deepgram    | ~DEEPGRAM_API_KEY~                                | A project-scoped key with ~project:read~ and ~billing:read~. |
 | elevenlabs  | ~ELEVENLABS_API_KEY~                              | A key that can read the user subscription, normally with ~user_read~. |
 | openai-api  | ~OPENAI_API_KEY~                                  | OpenAI does not expose prepaid balance to ordinary API keys. This account reports a clear per-account error. |
+
+A Claude Code account must configure exactly one of ~env~ or
+~credentials_file~. Credential-file paths must be absolute or begin with
+=~/=. The file is reread for every fetch, so a token refreshed by Claude
+Code is picked up on the next run or watch interval. ~ai-quotas~ never
+modifies or refreshes the file.
+
+Claude Code stores managed credentials in the macOS Keychain rather than a
+JSON file. Use the environment-token source on macOS.
 
 The OpenAI administration API exposes costs and spend limits, not remaining
 prepaid credit. Those values are not substituted because they represent
