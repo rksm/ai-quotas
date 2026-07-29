@@ -20,15 +20,21 @@ pub struct ServiceConfig {
 pub struct AccountTarget {
     pub service: Service,
     pub name: String,
-    pub env: BTreeMap<String, String>,
+    pub credentials: CredentialSource,
     pub thresholds: Thresholds,
+}
+
+pub enum CredentialSource {
+    Env(BTreeMap<String, String>),
+    File(PathBuf),
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccountConfig {
     pub name: String,
-    pub env: BTreeMap<String, String>,
+    pub env: Option<BTreeMap<String, String>>,
+    pub credentials_file: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -113,25 +119,31 @@ impl Config {
         service_filters: &[Service],
         account_filters: &[String],
     ) -> Result<Vec<AccountTarget>> {
-        let targets = self
-            .services
-            .into_iter()
-            .filter(|(service, _)| service_filters.is_empty() || service_filters.contains(service))
-            .flat_map(|(service, config)| {
-                config
-                    .accounts
-                    .into_iter()
-                    .filter(|account| {
-                        account_filters.is_empty() || account_filters.contains(&account.name)
-                    })
-                    .map(move |account| AccountTarget {
-                        service,
-                        name: account.name,
-                        env: account.env,
-                        thresholds: config.thresholds,
-                    })
-            })
-            .collect::<Vec<_>>();
+        let mut targets = Vec::new();
+        for (service, config) in self.services {
+            if !service_filters.is_empty() && !service_filters.contains(&service) {
+                continue;
+            }
+            for account in config.accounts {
+                if !account_filters.is_empty() && !account_filters.contains(&account.name) {
+                    continue;
+                }
+                let credentials = match (account.env, account.credentials_file) {
+                    (Some(env), None) => CredentialSource::Env(env),
+                    (None, Some(path)) => CredentialSource::File(path),
+                    _ => bail!(
+                        "account {:?} must configure exactly one of env or credentials_file",
+                        account.name
+                    ),
+                };
+                targets.push(AccountTarget {
+                    service,
+                    name: account.name,
+                    credentials,
+                    thresholds: config.thresholds,
+                });
+            }
+        }
 
         if targets.is_empty() {
             bail!("filters matched no configured accounts");
@@ -181,8 +193,41 @@ fn validate_accounts(service: Service, accounts: &[AccountConfig]) -> Result<()>
                 account.name
             );
         }
+        match (&account.env, &account.credentials_file) {
+            (Some(_), None) => {}
+            (None, Some(path)) if service == Service::ClaudeCode => {
+                validate_credentials_path(service, &account.name, path)?;
+            }
+            (None, Some(_)) => {
+                bail!(
+                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code",
+                    account.name
+                );
+            }
+            _ => {
+                bail!(
+                    "services.{service}.accounts entry {:?} must configure exactly one of env or credentials_file",
+                    account.name
+                );
+            }
+        }
     }
 
+    Ok(())
+}
+
+fn validate_credentials_path(service: Service, account: &str, path: &Path) -> Result<()> {
+    let path_text = path
+        .to_str()
+        .context("credentials_file path is not valid UTF-8")?;
+    if path_text.is_empty() {
+        bail!("services.{service}.accounts entry {account:?} has an empty credentials_file path");
+    }
+    if !path.is_absolute() && !path_text.starts_with("~/") {
+        bail!(
+            "services.{service}.accounts entry {account:?} credentials_file must be absolute or start with ~/"
+        );
+    }
     Ok(())
 }
 
@@ -218,6 +263,8 @@ services:
       - name: personal
         env:
           CLAUDE_CODE_OAUTH_TOKEN: token
+      - name: work
+        credentials_file: /home/example/.claude-work/.credentials.json
   deepgram:
     thresholds:
       balance_critical: 25
@@ -238,6 +285,13 @@ services:
         assert_close(claude.thresholds.balance_critical, 10.0);
         assert_close(deepgram.thresholds.balance_critical, 25.0);
         assert_eq!(claude.accounts[0].name, "personal");
+        assert!(matches!(
+            claude.accounts[1].credentials_file.as_deref(),
+            Some(path)
+                if path == std::path::Path::new(
+                    "/home/example/.claude-work/.credentials.json"
+                )
+        ));
     }
 
     #[test]
@@ -308,6 +362,87 @@ services:
         .expect("invalid thresholds should fail");
 
         assert!(error.to_string().contains("must be less"));
+    }
+
+    #[test]
+    fn rejects_credentials_file_for_other_services() {
+        let error = Config::from_yaml(
+            r"
+services:
+  codex:
+    accounts:
+      - name: main
+        credentials_file: /home/example/.codex/auth.json
+",
+        )
+        .err()
+        .expect("unsupported credentials file should fail");
+
+        assert!(error.to_string().contains("only supported by claude-code"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_credential_sources() {
+        let error = Config::from_yaml(
+            r"
+services:
+  claude-code:
+    accounts:
+      - name: work
+        credentials_file: /home/example/.claude-work/.credentials.json
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: token
+",
+        )
+        .err()
+        .expect("ambiguous credentials should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one of env or credentials_file")
+        );
+    }
+
+    #[test]
+    fn rejects_accounts_without_a_credential_source() {
+        let error = Config::from_yaml(
+            r"
+services:
+  claude-code:
+    accounts:
+      - name: work
+",
+        )
+        .err()
+        .expect("missing credentials should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("exactly one of env or credentials_file")
+        );
+    }
+
+    #[test]
+    fn rejects_relative_credentials_paths() {
+        let error = Config::from_yaml(
+            r"
+services:
+  claude-code:
+    accounts:
+      - name: work
+        credentials_file: .claude-work/.credentials.json
+",
+        )
+        .err()
+        .expect("relative credentials path should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("must be absolute or start with ~/")
+        );
     }
 
     #[test]

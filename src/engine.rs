@@ -32,7 +32,7 @@ struct RemoteFetcher<'a> {
 
 impl Fetcher for RemoteFetcher<'_> {
     async fn fetch(&self, target: &AccountTarget) -> Result<Vec<Metric>> {
-        providers::fetch(target.service, self.client, &target.env).await
+        providers::fetch(target.service, self.client, &target.credentials).await
     }
 }
 
@@ -76,7 +76,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::{AccountRefresh, Fetcher, query_with};
-    use crate::config::AccountTarget;
+    use crate::config::{AccountTarget, CredentialSource};
     use crate::model::{Level, Metric, Service, Thresholds};
 
     struct FakeFetcher;
@@ -127,7 +127,7 @@ mod tests {
         AccountTarget {
             service: Service::Codex,
             name: name.to_owned(),
-            env: BTreeMap::new(),
+            credentials: CredentialSource::Env(BTreeMap::new()),
             thresholds: Thresholds::default(),
         }
     }

@@ -10,12 +10,13 @@ use anyhow::{Context, Result, bail};
 use reqwest::{Client, Response, StatusCode};
 use serde::de::DeserializeOwned;
 
+use crate::config::CredentialSource;
 use crate::model::{Metric, Service};
 
 const USER_AGENT: &str = concat!("ai-quotas/", env!("CARGO_PKG_VERSION"));
 
 trait Provider {
-    async fn fetch(&self, client: &Client, env: &BTreeMap<String, String>) -> Result<Vec<Metric>>;
+    async fn fetch(&self, client: &Client, credentials: &CredentialSource) -> Result<Vec<Metric>>;
 }
 
 /// Fetch the fixed metric set for one configured service account.
@@ -27,14 +28,21 @@ trait Provider {
 pub async fn fetch(
     service: Service,
     client: &Client,
-    env: &BTreeMap<String, String>,
+    credentials: &CredentialSource,
 ) -> Result<Vec<Metric>> {
     match service {
-        Service::ClaudeCode => claude_code::ClaudeCode.fetch(client, env).await,
-        Service::Codex => codex::Codex.fetch(client, env).await,
-        Service::OpenaiApi => openai_api::OpenAiApi.fetch(client, env).await,
-        Service::Deepgram => deepgram::Deepgram.fetch(client, env).await,
-        Service::Elevenlabs => elevenlabs::ElevenLabs.fetch(client, env).await,
+        Service::ClaudeCode => claude_code::ClaudeCode.fetch(client, credentials).await,
+        Service::Codex => codex::Codex.fetch(client, credentials).await,
+        Service::OpenaiApi => openai_api::OpenAiApi.fetch(client, credentials).await,
+        Service::Deepgram => deepgram::Deepgram.fetch(client, credentials).await,
+        Service::Elevenlabs => elevenlabs::ElevenLabs.fetch(client, credentials).await,
+    }
+}
+
+fn environment(credentials: &CredentialSource) -> Result<&BTreeMap<String, String>> {
+    match credentials {
+        CredentialSource::Env(env) => Ok(env),
+        CredentialSource::File(_) => bail!("credentials_file is not supported by this provider"),
     }
 }
 
