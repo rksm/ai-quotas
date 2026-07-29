@@ -18,6 +18,33 @@ Without ~--config~, the CLI reads
 ~~/.config/ai-quotas/config.yaml~. See [[file:docs/IDEA.org][docs/IDEA.org]] for
 the complete configuration shape and command-line interface.
 
+* Install with Nix
+
+Install directly from GitHub:
+
+#+BEGIN_SRC shell
+nix profile install github:rksm/ai-quotas
+#+END_SRC
+
+To consume the package from another flake:
+
+#+BEGIN_SRC nix
+{
+  inputs.ai-quotas.url = "github:rksm/ai-quotas";
+
+  outputs = { nixpkgs, ai-quotas, ... }: {
+    nixosConfigurations.example = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [{
+        environment.systemPackages = [
+          ai-quotas.packages.x86_64-linux.default
+        ];
+      }];
+    };
+  };
+}
+#+END_SRC
+
 The configuration can contain literal credentials or paths to managed
 credential files. Restrict its filesystem permissions accordingly.
 

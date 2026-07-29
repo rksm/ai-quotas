@@ -4,34 +4,55 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let pkgs = import nixpkgs { inherit system; };
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
+    {
+      overlays.default = final: prev: {
+        ai-quotas = final.callPackage ./default.nix { };
+      };
+    }
+    // flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ self.overlays.default ];
+        };
       in
-        {
-          devShells.default = pkgs.mkShell {
-            nativeBuildInputs = with pkgs; [
-              rustc
-              cargo
-              clippy
-              just
-              pkg-config
-            ];
+      {
+        packages = {
+          default = pkgs.ai-quotas;
+          ai-quotas = pkgs.ai-quotas;
+        };
 
-            buildInputs = with pkgs; [
-              openssl
-              clang
-            ] ++ (if pkgs.stdenv.isDarwin then [ libiconv ] else [ ]);
+        devShells.default = pkgs.mkShell {
+          nativeBuildInputs = with pkgs; [
+            rustc
+            cargo
+            clippy
+            just
+            pkg-config
+          ];
 
-            packages = with pkgs; [
-              rust-analyzer
-              (rustfmt.override { asNightly = true; })
-            ];
+          buildInputs = with pkgs; [
+            openssl
+            clang
+          ] ++ (if pkgs.stdenv.isDarwin then [ libiconv ] else [ ]);
 
-            RUST_BACKTRACE = "1";
-            RUST_LOG = "debug";
-            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-          };
-        }
+          packages = with pkgs; [
+            ai-quotas
+            rust-analyzer
+            (rustfmt.override { asNightly = true; })
+          ];
+
+          RUST_BACKTRACE = "1";
+          RUST_LOG = "debug";
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+        };
+      }
     );
 }
