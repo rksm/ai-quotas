@@ -3,6 +3,7 @@ mod codex;
 mod deepgram;
 mod elevenlabs;
 mod openai_api;
+mod runpod;
 
 use std::collections::BTreeMap;
 
@@ -36,6 +37,7 @@ pub async fn fetch(
         Service::OpenaiApi => openai_api::OpenAiApi.fetch(client, credentials).await,
         Service::Deepgram => deepgram::Deepgram.fetch(client, credentials).await,
         Service::Elevenlabs => elevenlabs::ElevenLabs.fetch(client, credentials).await,
+        Service::Runpod => runpod::Runpod.fetch(client, credentials).await,
     }
 }
 

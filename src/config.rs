@@ -272,6 +272,11 @@ services:
       - name: main
         env:
           DEEPGRAM_API_KEY: key
+  runpod:
+    accounts:
+      - name: main
+        env:
+          RUNPOD_API_KEY: key
 ";
 
     #[test]
@@ -279,11 +284,13 @@ services:
         let config = Config::from_yaml(CONFIG).unwrap();
         let claude = &config.services[&Service::ClaudeCode];
         let deepgram = &config.services[&Service::Deepgram];
+        let runpod = &config.services[&Service::Runpod];
 
         assert_close(claude.thresholds.quota_warn, 75.0);
         assert_close(claude.thresholds.quota_critical, 90.0);
         assert_close(claude.thresholds.balance_critical, 10.0);
         assert_close(deepgram.thresholds.balance_critical, 25.0);
+        assert_close(runpod.thresholds.balance_critical, 10.0);
         assert_eq!(claude.accounts[0].name, "personal");
         assert!(matches!(
             claude.accounts[1].credentials_file.as_deref(),

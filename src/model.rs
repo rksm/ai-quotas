@@ -13,6 +13,7 @@ pub enum Service {
     OpenaiApi,
     Deepgram,
     Elevenlabs,
+    Runpod,
 }
 
 impl fmt::Display for Service {
@@ -23,6 +24,7 @@ impl fmt::Display for Service {
             Self::OpenaiApi => "openai-api",
             Self::Deepgram => "deepgram",
             Self::Elevenlabs => "elevenlabs",
+            Self::Runpod => "runpod",
         })
     }
 }

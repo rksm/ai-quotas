@@ -70,6 +70,8 @@ mod tests {
             "claude-code",
             "--service",
             "codex",
+            "--service",
+            "runpod",
             "--account",
             "work",
             "--account",
@@ -77,7 +79,10 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(cli.services, [Service::ClaudeCode, Service::Codex]);
+        assert_eq!(
+            cli.services,
+            [Service::ClaudeCode, Service::Codex, Service::Runpod]
+        );
         assert_eq!(cli.accounts, ["work", "personal"]);
     }
 
