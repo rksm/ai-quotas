@@ -1,0 +1,226 @@
+#+TITLE: ai-quotas
+#+DATE: [2026-07-29 Wed]
+
+* Idea
+
+A Rust CLI app that monitors quotas of AI-related services. Stage one covers
+quotas and prepaid balances. Stage two will add cost monitoring.
+
+One invocation reads a declarative YAML config, queries all configured
+services and accounts in parallel, and renders the results either as a
+human-readable table or as JSON.
+
+** Core design idea
+
+The binary ships with hard-coded provider modules, one per service. The YAML
+config only selects services, names accounts, and supplies credentials. All
+knowledge about how to query a service lives in exactly one Rust module.
+
+* Services and metrics
+
+Two kinds of metrics exist, and every provider returns a list of them:
+
+- *Windowed quota*: percent used plus reset time (label, used_percent,
+  resets_at). Raw ~used~ / ~limit~ values are carried along when the service
+  provides them.
+- *Balance*: remaining prepaid amount (amount, currency), also with optional
+  raw values (e.g. ElevenLabs character counts).
+
+| Service     | Accounts | Metrics                                     |
+|-------------+----------+---------------------------------------------|
+| claude-code | 2 (Max)  | 5h window, 7d window, Fable weekly window   |
+| codex       | 1        | 7d window                                   |
+| openai-api  | 2        | prepaid balance                             |
+| deepgram    | 1        | prepaid balance                             |
+| elevenlabs  | 1        | credits remaining (count / limit)           |
+
+Each provider fetches its full fixed metric set. There is no per-account
+metric selection in the config.
+
+* Querying strategy
+
+Per provider, decided at implementation time:
+
+1. *API first*: direct HTTPS calls from Rust when an endpoint works for the
+   given app, quota type, and login method. For claude-code this is the
+   OAuth-authenticated usage endpoint that powers the ~/usage~ screen, for
+   codex the ChatGPT backend rate-limit endpoint.
+2. *CLI fallback*: spawn the vendor CLI with the account's env injected and
+   parse its output, only where no workable API route exists.
+
+If an undocumented endpoint changes, the fix lives in that one provider
+module.
+
+* Credentials
+
+Each account entry carries an ~env~ map with literal values. The provider
+either reads the variables directly (API calls) or injects them into the
+subprocess environment (CLI fallback). Secrets in the YAML are acceptable,
+the app has no secret store of its own. OAuth token expiry is reported as a
+clear per-account error, re-login happens outside the app.
+
+* Configuration
+
+Default location ~~/.config/ai-quotas/config.yaml~, overridable with
+~--config~. Unknown service keys are a config error. Account names appear in
+output and JSON.
+
+#+BEGIN_SRC yaml
+thresholds:            # optional, defaults built in
+  quota_warn: 70       # percent used -> yellow
+  quota_critical: 90   # percent used -> red
+  balance_critical: 10.0   # currency units -> red
+
+services:
+  claude-code:
+    accounts:
+      - name: personal
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: sk-ant-oat01-...
+      - name: work
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: sk-ant-oat01-...
+  codex:
+    accounts:
+      - name: main
+        env:
+          CODEX_OAUTH_TOKEN: ...
+  openai-api:
+    accounts:
+      - name: personal
+        env:
+          OPENAI_API_KEY: sk-...
+      - name: hyper
+        env:
+          OPENAI_API_KEY: sk-...
+  deepgram:
+    thresholds:              # per-service override
+      balance_critical: 25.0
+    accounts:
+      - name: main
+        env:
+          DEEPGRAM_API_KEY: ...
+  elevenlabs:
+    accounts:
+      - name: main
+        env:
+          ELEVENLABS_API_KEY: ...
+#+END_SRC
+
+Threshold defaults: quotas turn yellow at 70% used and red at 90%. Balances
+turn red below $10. ElevenLabs credits turn red below 10% of the plan limit
+(the limit is known there).
+
+* CLI surface
+
+#+BEGIN_SRC text
+ai-quotas [--config PATH] [--json] [--watch] [--interval SECS]
+          [--service NAME]... [--account NAME]...
+#+END_SRC
+
+- Default run: fetch everything in parallel, print the table, exit.
+- ~--service~ / ~--account~ are repeatable filters. Only selected accounts
+  are fetched, unneeded network calls are skipped.
+- Exit codes: 0 all accounts fetched, 1 at least one account errored,
+  2 config or usage error.
+
+* Human-readable output
+
+A table grouped by service and account. Service and account render once as a
+header line, the account's metrics are grouped beneath it so one account
+reads as one block.
+
+#+BEGIN_SRC text
+claude-code  personal
+  5h            42% ████░░░░  resets 14:00 (in 2h 10m)
+  7d            71% ██████░░  resets Thu 09:00 (in 1d 19h)
+  fable-week    12% █░░░░░░░  resets Mon 00:00 (in 4d 10h)
+claude-code  work
+  5h             3% ░░░░░░░░  resets 14:00 (in 2h 10m)
+codex        main
+  7d            55% ████░░░░  resets Fri 12:00 (in 2d 22h)
+openai-api   personal
+  balance       $23.41 remaining
+deepgram     main
+  balance       $102.10 remaining
+elevenlabs   main
+  credits       81,203 / 100,000 remaining
+#+END_SRC
+
+- Usage bars plus percent for windowed quotas, plain amounts for balances.
+- Reset times as local time plus relative duration.
+- Color when stdout is a TTY, plain text otherwise. Metrics past the warn
+  threshold render yellow, past the critical threshold (little quota or
+  money left) render red.
+
+* Watch mode
+
+- ~--watch~ with ~--interval~ (default 60 seconds).
+- Clear screen, re-render the same table, footer line with
+  ~last updated 14:32:07, next in 60s~.
+- If one account's fetch fails mid-watch, keep its last known values,
+  dimmed, with an error marker and data age
+  (~claude-code/work: stale 5m, auth error~). One flaky endpoint never
+  blanks the dashboard or kills the loop.
+
+* JSON output
+
+~--json~ emits one document with stable field names, a flat list of
+service+account entries for easy ~jq~ consumption. Combined with ~--watch~
+it emits one document per interval as JSONL.
+
+#+BEGIN_SRC json
+{
+  "generated_at": "2026-07-29T14:32:07+02:00",
+  "services": [
+    {
+      "service": "claude-code",
+      "account": "personal",
+      "status": "ok",
+      "metrics": [
+        {
+          "kind": "window",
+          "label": "5h",
+          "used_percent": 42.0,
+          "used": null,
+          "limit": null,
+          "resets_at": "2026-07-29T14:00:00+02:00",
+          "level": "ok"
+        }
+      ]
+    },
+    {
+      "service": "claude-code",
+      "account": "work",
+      "status": "error",
+      "error": "auth token expired",
+      "metrics": []
+    }
+  ]
+}
+#+END_SRC
+
+- Per-entry ~status~ / ~error~ so one broken account does not poison the
+  document.
+- ~level~ (~ok~ / ~warn~ / ~critical~) is included so consumers get the
+  threshold evaluation for free. Threshold logic has one home.
+
+* Implementation
+
+Deliberately boring stack:
+
+- *tokio + reqwest*: one async task per account, ~join_all~, 10 second
+  per-fetch timeout
+- *serde / serde_yaml / serde_json*: config and output
+- *clap*: CLI surface
+- Provider trait ~fetch(account_env) -> Result<Vec<Metric>>~, one module per
+  service. The whole app is: read config, fan out fetches, render.
+- Plain ANSI colors and manual table rendering, no TUI crate
+- Nix flake dev shell plus justfile (~just run~, ~just watch~, ~just test~)
+
+* Stage two: costs
+
+Deferred entirely, no placeholder config or code in stage one. The extension
+path is a new metric kind (cost over period) plus per-provider cost
+fetching. The metric-kind enum is the natural seam, adding a variant later
+is cheap.
