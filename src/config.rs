@@ -19,6 +19,14 @@ pub struct ServiceConfig {
     pub accounts: Vec<AccountConfig>,
 }
 
+#[derive(Debug)]
+pub struct AccountTarget {
+    pub service: Service,
+    pub name: String,
+    pub env: BTreeMap<String, String>,
+    pub thresholds: Thresholds,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccountConfig {
@@ -96,6 +104,43 @@ impl Config {
             .with_context(|| format!("could not read {}", path.display()))?;
         Self::from_yaml(&yaml)
             .with_context(|| format!("invalid configuration in {}", path.display()))
+    }
+
+    /// Select configured accounts using intersecting service and account filters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the filters match no configured accounts.
+    pub fn select(
+        self,
+        service_filters: &[Service],
+        account_filters: &[String],
+    ) -> Result<Vec<AccountTarget>> {
+        let targets = self
+            .services
+            .into_iter()
+            .filter(|(service, _)| service_filters.is_empty() || service_filters.contains(service))
+            .flat_map(|(service, config)| {
+                config
+                    .accounts
+                    .into_iter()
+                    .filter(|account| {
+                        account_filters.is_empty() || account_filters.contains(&account.name)
+                    })
+                    .map(move |account| AccountTarget {
+                        service,
+                        name: account.name,
+                        env: account.env,
+                        thresholds: config.thresholds,
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        if targets.is_empty() {
+            bail!("filters matched no configured accounts");
+        }
+
+        Ok(targets)
     }
 }
 
@@ -262,6 +307,28 @@ services:
         .unwrap_err();
 
         assert!(error.to_string().contains("must be less"));
+    }
+
+    #[test]
+    fn selects_the_intersection_of_service_and_account_filters() {
+        let targets = Config::from_yaml(CONFIG)
+            .unwrap()
+            .select(&[Service::Deepgram], &["main".to_owned()])
+            .unwrap();
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].service, Service::Deepgram);
+        assert_eq!(targets[0].name, "main");
+    }
+
+    #[test]
+    fn rejects_filters_that_match_nothing() {
+        let error = Config::from_yaml(CONFIG)
+            .unwrap()
+            .select(&[Service::Codex], &[])
+            .unwrap_err();
+
+        assert!(error.to_string().contains("matched no configured accounts"));
     }
 
     fn assert_close(actual: f64, expected: f64) {
