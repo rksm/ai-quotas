@@ -1,0 +1,47 @@
+#+TITLE: ai-quotas
+
+Monitor quota windows and prepaid balances for configured AI service
+accounts.
+
+* Build and run
+
+The development environment is provided by the Nix flake.
+
+#+BEGIN_SRC shell
+direnv allow
+just check
+just run -- --config path/to/config.yaml
+just watch -- --config path/to/config.yaml
+#+END_SRC
+
+Without ~--config~, the CLI reads
+~~/.config/ai-quotas/config.yaml~. See [[file:docs/IDEA.org][docs/IDEA.org]] for
+the complete configuration shape and command-line interface.
+
+The configuration contains literal credentials. Restrict its filesystem
+permissions accordingly.
+
+* Credential requirements
+
+| Service     | Environment variable                              | Requirement |
+|-------------+---------------------------------------------------+-------------|
+| claude-code | ~CLAUDE_CODE_OAUTH_TOKEN~                         | A full OAuth access token with the ~user:profile~ scope. A ~claude setup-token~ token is normally inference-only and cannot read usage. |
+| codex       | ~CODEX_OAUTH_TOKEN~, optional ~CODEX_ACCOUNT_ID~  | The managed-login access token. Set the account ID for reliable routing when the login belongs to multiple workspaces. |
+| codex       | ~CODEX_ACCESS_TOKEN~                              | An ~at-~ personal access token. The CLI discovers its ChatGPT account ID. |
+| deepgram    | ~DEEPGRAM_API_KEY~                                | A project-scoped key with ~project:read~ and ~billing:read~. |
+| elevenlabs  | ~ELEVENLABS_API_KEY~                              | A key that can read the user subscription, normally with ~user_read~. |
+| openai-api  | ~OPENAI_API_KEY~                                  | OpenAI does not expose prepaid balance to ordinary API keys. This account reports a clear per-account error. |
+
+The OpenAI administration API exposes costs and spend limits, not remaining
+prepaid credit. Those values are not substituted because they represent
+different metrics.
+
+* Output and exit status
+
+The default output is a grouped table. ~--json~ emits one JSON document.
+With ~--watch~, human output refreshes in place and JSON output becomes
+JSONL.
+
+- Exit 0 means every selected account fetched successfully.
+- Exit 1 means at least one selected account failed.
+- Exit 2 means the command or configuration was invalid.

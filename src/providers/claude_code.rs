@@ -72,7 +72,12 @@ fn parse_usage(usage: UsageResponse) -> Result<Vec<Metric>> {
         metrics.push(metric);
     }
 
-    if let Some(limit) = usage.limits.into_iter().flatten().find(is_fable_limit)
+    if let Some(limit) = usage
+        .limits
+        .into_iter()
+        .flatten()
+        .filter(is_fable_limit)
+        .max_by_key(|limit| limit.is_active == Some(true))
         && let Some(metric) = metric_from_limit("fable-week", limit)?
     {
         metrics.push(metric);
@@ -145,6 +150,7 @@ struct ScopedLimit {
     utilization: Option<f64>,
     resets_at: Option<Timestamp>,
     scope: Option<LimitScope>,
+    is_active: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -239,6 +245,36 @@ mod tests {
         let metrics = parse_usage(response).unwrap();
 
         assert_eq!(labels(&metrics), ["7d"]);
+    }
+
+    #[test]
+    fn prefers_an_active_fable_limit_but_accepts_an_inactive_one() {
+        let response: UsageResponse = serde_json::from_value(json!({
+            "limits": [
+                {
+                    "kind": "weekly_scoped",
+                    "percent": 90,
+                    "resets_at": "2026-08-03T00:00:00Z",
+                    "scope": {"model": {"display_name": "Fable"}},
+                    "is_active": false
+                },
+                {
+                    "kind": "weekly_scoped",
+                    "percent": 20,
+                    "resets_at": "2026-08-03T00:00:00Z",
+                    "scope": {"model": {"display_name": "Fable"}},
+                    "is_active": true
+                }
+            ]
+        }))
+        .unwrap();
+
+        let metrics = parse_usage(response).unwrap();
+
+        let Metric::Window { used_percent, .. } = &metrics[0] else {
+            panic!("expected window metric");
+        };
+        assert!((*used_percent - 20.0).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -41,6 +41,11 @@ async fn fetch_from(
     } else {
         let token = credential(env, ACCESS_TOKEN_VARIABLE)
             .context("set CODEX_OAUTH_TOKEN or CODEX_ACCESS_TOKEN")?;
+        if !token.starts_with("at-") {
+            bail!(
+                "CODEX_ACCESS_TOKEN must be an at- personal access token, use CODEX_OAUTH_TOKEN for a raw OAuth access token"
+            );
+        }
         let response = whoami_request(client, auth_url, token)
             .send()
             .await
@@ -150,11 +155,13 @@ struct RateLimitWindow {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use chrono::{TimeZone, Utc};
     use reqwest::Client;
     use serde_json::json;
 
-    use super::{UsageResponse, parse_weekly_quota, usage_request, whoami_request};
+    use super::{UsageResponse, fetch_from, parse_weekly_quota, usage_request, whoami_request};
     use crate::model::Metric;
 
     #[test]
@@ -220,6 +227,29 @@ mod tests {
         assert_eq!(
             whoami.url().as_str(),
             "https://auth.example/api/accounts/v1/user-auth-credential/whoami"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_non_pat_values_in_the_access_token_variable() {
+        let env = BTreeMap::from([(
+            "CODEX_ACCESS_TOKEN".to_owned(),
+            "oauth-access-token".to_owned(),
+        )]);
+
+        let error = fetch_from(
+            &Client::new(),
+            &env,
+            "https://auth.example",
+            "https://chatgpt.example",
+        )
+        .await
+        .expect_err("a non-PAT access token should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("must be an at- personal access token")
         );
     }
 }

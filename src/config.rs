@@ -8,18 +8,15 @@ use serde::Deserialize;
 
 use crate::model::{Service, Thresholds};
 
-#[derive(Debug)]
 pub struct Config {
     pub services: BTreeMap<Service, ServiceConfig>,
 }
 
-#[derive(Debug)]
 pub struct ServiceConfig {
     pub thresholds: Thresholds,
     pub accounts: Vec<AccountConfig>,
 }
 
-#[derive(Debug)]
 pub struct AccountTarget {
     pub service: Service,
     pub name: String,
@@ -27,14 +24,14 @@ pub struct AccountTarget {
     pub thresholds: Thresholds,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccountConfig {
     pub name: String,
     pub env: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     #[serde(default)]
@@ -42,7 +39,7 @@ struct RawConfig {
     services: BTreeMap<Service, RawServiceConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawServiceConfig {
     #[serde(default)]
@@ -50,7 +47,7 @@ struct RawServiceConfig {
     accounts: Vec<AccountConfig>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[derive(Clone, Copy, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ThresholdOverrides {
     quota_warn: Option<f64>,
@@ -254,7 +251,8 @@ services:
         env: {}
 ",
         )
-        .unwrap_err();
+        .err()
+        .expect("unknown service should fail");
 
         assert!(format!("{error:#}").contains("unknown variant `unknown`"));
     }
@@ -267,7 +265,8 @@ extra: true
 services: {}
 ",
         )
-        .unwrap_err();
+        .err()
+        .expect("unknown field should fail");
 
         assert!(format!("{error:#}").contains("unknown field"));
     }
@@ -285,7 +284,8 @@ services:
         env: {}
 ",
         )
-        .unwrap_err();
+        .err()
+        .expect("duplicate account should fail");
 
         assert!(error.to_string().contains("duplicate name"));
     }
@@ -304,7 +304,8 @@ services:
         env: {}
 ",
         )
-        .unwrap_err();
+        .err()
+        .expect("invalid thresholds should fail");
 
         assert!(error.to_string().contains("must be less"));
     }
@@ -326,7 +327,8 @@ services:
         let error = Config::from_yaml(CONFIG)
             .unwrap()
             .select(&[Service::Codex], &[])
-            .unwrap_err();
+            .err()
+            .expect("unmatched filters should fail");
 
         assert!(error.to_string().contains("matched no configured accounts"));
     }
