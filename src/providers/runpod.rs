@@ -58,13 +58,16 @@ fn balance_metric(response: BalanceResponse) -> Result<Metric> {
         .data
         .and_then(|data| data.myself)
         .context("Runpod returned no account data")?;
-    if !account.client_balance.is_finite() {
+    let balance = account
+        .client_balance
+        .context("Runpod returned no account balance")?;
+    if !balance.is_finite() {
         bail!("Runpod returned an invalid balance amount");
     }
 
     Ok(Metric::Balance {
         label: "balance".to_owned(),
-        amount: account.client_balance,
+        amount: balance,
         currency: "USD".to_owned(),
         used: None,
         limit: None,
@@ -86,7 +89,7 @@ struct BalanceData {
 #[derive(Debug, Deserialize)]
 struct Account {
     #[serde(rename = "clientBalance")]
-    client_balance: f64,
+    client_balance: Option<f64>,
 }
 
 #[cfg(test)]
@@ -152,11 +155,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_account_balance() {
+        let response: BalanceResponse = serde_json::from_value(json!({
+            "data": {
+                "myself": {
+                    "clientBalance": null
+                }
+            }
+        }))
+        .unwrap();
+
+        let error = balance_metric(response).unwrap_err();
+
+        assert!(error.to_string().contains("no account balance"));
+    }
+
+    #[test]
     fn rejects_non_finite_balances() {
         let response = BalanceResponse {
             data: Some(BalanceData {
                 myself: Some(Account {
-                    client_balance: f64::NAN,
+                    client_balance: Some(f64::NAN),
                 }),
             }),
             errors: Vec::new(),
@@ -176,6 +195,7 @@ mod tests {
         assert_eq!(request.method(), Method::POST);
         assert_eq!(request.url().as_str(), "https://example.com/graphql");
         assert_eq!(request.headers()["authorization"], "Bearer secret");
+        assert_eq!(request.headers()["content-type"], "application/json");
         assert!(!request.url().as_str().contains("secret"));
 
         let body = request.body().unwrap().as_bytes().unwrap();
