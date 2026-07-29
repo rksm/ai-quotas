@@ -14,6 +14,7 @@
               rustc
               cargo
               clippy
+              just
               pkg-config
             ];
 

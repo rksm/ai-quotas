@@ -1,0 +1,12 @@
+[package]
+name = "ai-quotas"
+version = "0.1.0"
+edition = "2024"
+description = "Monitor quotas and prepaid balances for AI services"
+license = "MIT"
+
+[lints.clippy]
+pedantic = "warn"
+
+[lints.rust]
+unsafe_code = "forbid"
