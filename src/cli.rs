@@ -6,7 +6,7 @@ use clap::Parser;
 
 use crate::model::Service;
 
-const DEFAULT_INTERVAL_SECONDS: u64 = 60;
+const DEFAULT_INTERVAL_SECONDS: u64 = 5 * 60;
 
 #[derive(Debug, Parser)]
 #[command(version, about)]
@@ -54,10 +54,10 @@ mod tests {
     use crate::model::Service;
 
     #[test]
-    fn defaults_to_a_sixty_second_interval() {
+    fn defaults_to_a_five_minute_interval() {
         let cli = Cli::try_parse_from(["ai-quotas"]).unwrap();
 
-        assert_eq!(cli.interval().as_secs(), 60);
+        assert_eq!(cli.interval().as_secs(), 300);
         assert!(!cli.watch);
         assert!(!cli.json);
     }

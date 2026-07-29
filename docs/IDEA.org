@@ -199,9 +199,9 @@ runpod       main
 
 * Watch mode
 
-- ~--watch~ with ~--interval~ (default 60 seconds).
+- ~--watch~ with ~--interval~ (default 300 seconds).
 - Clear screen, re-render the same table, footer line with
-  ~last updated 14:32:07, next in 60s~.
+  ~last updated 14:32:07, next in 300s~.
 - If one account's fetch fails mid-watch, keep its last known values,
   dimmed, with an error marker and data age
   (~claude-code/work: stale 5m, auth error~). One flaky endpoint never
