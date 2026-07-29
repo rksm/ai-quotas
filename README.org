@@ -1,7 +1,7 @@
 #+TITLE: ai-quotas
 
-Monitor quota windows and prepaid balances for configured AI service
-accounts.
+Monitor quota windows, costs, and prepaid balances for configured AI
+service accounts.
 
 * Build and run
 
@@ -10,8 +10,8 @@ The development environment is provided by the Nix flake.
 #+BEGIN_SRC shell
 direnv allow
 just check
-just run -- --config path/to/config.yaml
-just watch -- --config path/to/config.yaml
+just run --config path/to/config.yaml
+just watch --config path/to/config.yaml
 #+END_SRC
 
 Without ~--config~, the CLI reads
@@ -32,7 +32,7 @@ credential files. Restrict its filesystem permissions accordingly.
 | deepgram    | ~DEEPGRAM_API_KEY~                                | A project-scoped key with ~project:read~ and ~billing:read~. |
 | elevenlabs  | ~ELEVENLABS_API_KEY~                              | A key that can read the user subscription, normally with ~user_read~. |
 | runpod      | ~RUNPOD_API_KEY~                                  | A Runpod API key permitted to read GraphQL account data. |
-| openai-api  | ~OPENAI_API_KEY~                                  | OpenAI does not expose prepaid balance to ordinary API keys. This account reports a clear per-account error. |
+| openai-api  | ~OPENAI_ADMIN_KEY~                                | An organization Admin API key. The provider reads current UTC month costs and an optional hard spend limit. |
 
 A Claude Code account must configure exactly one of ~env~ or
 ~credentials_file~. Credential-file paths must be absolute or begin with
@@ -44,8 +44,27 @@ Claude Code stores managed credentials in the macOS Keychain rather than a
 JSON file. Use the environment-token source on macOS.
 
 The OpenAI administration API exposes costs and spend limits, not remaining
-prepaid credit. Those values are not substituted because they represent
-different metrics.
+prepaid credit. The provider reports current UTC calendar-month spend. If
+the organization has a hard monthly spend limit, it also reports the
+remaining limit headroom. See the [[https://developers.openai.com/cookbook/examples/completions_usage_api][OpenAI Usage and Costs API example]].
+
+The exact prepaid balance remains available only in the
+[[https://platform.openai.com/settings/organization/billing/credit-grants][OpenAI billing dashboard]].
+
+An OpenAI account can optionally anchor an estimated balance to a value
+copied from that dashboard:
+
+#+BEGIN_SRC yaml
+balance:
+  as_of: "2026-07-29T18:00:00+02:00"
+  amount: 20.00
+  currency: USD
+#+END_SRC
+
+The provider subtracts costs since ~as_of~ and reports the result as
+~est-balance~. Update the anchor after a top-up, credit expiration, refund,
+or other balance adjustment. The estimate can briefly lag because OpenAI
+cost reporting is not immediate.
 
 * Output and exit status
 

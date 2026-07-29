@@ -3,8 +3,8 @@
 
 * Idea
 
-A Rust CLI app that monitors quotas of AI-related services. Stage one covers
-quotas and prepaid balances. Stage two will add cost monitoring.
+A Rust CLI app that monitors quotas, costs, and prepaid balances of
+AI-related services.
 
 One invocation reads a declarative YAML config, queries all configured
 services and accounts in parallel, and renders the results either as a
@@ -13,27 +13,30 @@ human-readable table or as JSON.
 ** Core design idea
 
 The binary ships with hard-coded provider modules, one per service. The YAML
-config only selects services, names accounts, and supplies credentials. All
-knowledge about how to query a service lives in exactly one Rust module.
+config selects services, names accounts, supplies credentials, and can
+anchor an estimated OpenAI balance. All knowledge about how to query a
+service lives in exactly one Rust module.
 
 * Services and metrics
 
-Two kinds of metrics exist, and every provider returns a list of them:
+Three kinds of metrics exist, and every provider returns a list of them:
 
 - *Windowed quota*: percent used plus reset time (label, used_percent,
   resets_at). Raw ~used~ / ~limit~ values are carried along when the service
   provides them.
 - *Balance*: remaining prepaid amount (amount, currency), also with optional
   raw values (e.g. ElevenLabs character counts).
+- *Cost*: an amount spent over the period named by its label. Cost metrics
+  are informational until cost-specific thresholds are added.
 
-| Service     | Accounts | Metrics                                     |
-|-------------+----------+---------------------------------------------|
-| claude-code | 2 (Max)  | 5h window, 7d window, Fable weekly window   |
-| codex       | 1        | 7d window                                   |
-| openai-api  | 2        | prepaid balance                             |
-| deepgram    | 1        | prepaid balance                             |
-| elevenlabs  | 1        | credits remaining (count / limit)           |
-| runpod      | 1        | prepaid balance                             |
+| Service     | Accounts | Metrics                                            |
+|-------------+----------+----------------------------------------------------|
+| claude-code | 2 (Max)  | 5h window, 7d window, Fable weekly window          |
+| codex       | 1        | 7d window                                          |
+| openai-api  | 1        | UTC month spend, estimated balance, limit headroom |
+| deepgram    | 1        | prepaid balance                                    |
+| elevenlabs  | 1        | credits remaining (count / limit)                  |
+| runpod      | 1        | prepaid balance                                    |
 
 Each provider fetches its full fixed metric set. There is no per-account
 metric selection in the config.
@@ -44,8 +47,9 @@ Per provider, decided at implementation time:
 
 1. *API first*: direct HTTPS calls from Rust when an endpoint works for the
    given app, quota type, and login method. For claude-code this is the
-   OAuth-authenticated usage endpoint that powers the ~/usage~ screen, for
-   codex the ChatGPT backend rate-limit endpoint.
+   OAuth-authenticated usage endpoint that powers the ~/usage~ screen. For
+   codex it is the ChatGPT backend rate-limit endpoint. For openai-api it is
+   the organization Costs API and optional hard spend-limit endpoint.
 2. *CLI fallback*: spawn the vendor CLI with the account's env injected and
    parse its output, only where no workable API route exists.
 
@@ -71,6 +75,25 @@ source.
 
 Secrets in YAML are acceptable because the app has no secret store of its
 own. Protect the config and every referenced credential file accordingly.
+
+** OpenAI estimated balance
+
+OpenAI does not expose prepaid credit balance through its supported API.
+An account can optionally record a balance copied from the billing
+dashboard at a precise time:
+
+#+BEGIN_SRC yaml
+balance:
+  as_of: "2026-07-29T18:00:00+02:00"
+  amount: 20.00
+  currency: USD
+#+END_SRC
+
+The provider calculates ~amount - costs since as_of~ and labels the result
+~est-balance~. The value is an estimate because the Costs API does not
+represent later top-ups, credit expiration, refunds, or other balance
+adjustments. OpenAI cost reporting can also lag. Copy a fresh dashboard
+balance and update ~as_of~ after any adjustment.
 
 * Configuration
 
@@ -98,12 +121,13 @@ services:
           CODEX_OAUTH_TOKEN: ...
   openai-api:
     accounts:
-      - name: personal
+      - name: main
         env:
-          OPENAI_API_KEY: sk-...
-      - name: hyper
-        env:
-          OPENAI_API_KEY: sk-...
+          OPENAI_ADMIN_KEY: sk-admin-...
+        balance:                    # optional estimate anchor
+          as_of: "2026-07-29T18:00:00+02:00"
+          amount: 20.00
+          currency: USD
   deepgram:
     thresholds:              # per-service override
       balance_critical: 25.0
@@ -155,8 +179,9 @@ claude-code  work
   5h             3% ░░░░░░░░  resets 14:00 (in 2h 10m)
 codex        main
   7d            55% ████░░░░  resets Fri 12:00 (in 2d 22h)
-openai-api   personal
-  balance       $23.41 remaining
+openai-api   main
+  est-balance   $19.42 remaining
+  month-spend   $9.20 spent
 deepgram     main
   balance       $102.10 remaining
 elevenlabs   main
@@ -165,7 +190,8 @@ runpod       main
   balance       $435.85 remaining
 #+END_SRC
 
-- Usage bars plus percent for windowed quotas, plain amounts for balances.
+- Usage bars plus percent for windowed quotas, plain amounts for balances
+  and costs.
 - Reset times as local time plus relative duration.
 - Color when stdout is a TTY, plain text otherwise. Metrics past the warn
   threshold render yellow, past the critical threshold (little quota or
@@ -231,15 +257,15 @@ Deliberately boring stack:
   per-fetch timeout
 - *serde / serde_yaml / serde_json*: config and output
 - *clap*: CLI surface
-- Provider trait ~fetch(account_credentials) -> Result<Vec<Metric>>~, one
+- Provider trait ~fetch(account) -> Result<Vec<Metric>>~, one
   module per service. The whole app is: read config, fan out fetches,
   render.
 - Plain ANSI colors and manual table rendering, no TUI crate
 - Nix flake dev shell plus justfile (~just run~, ~just watch~, ~just test~)
 
-* Stage two: costs
+* Further cost monitoring
 
-Deferred entirely, no placeholder config or code in stage one. The extension
-path is a new metric kind (cost over period) plus per-provider cost
-fetching. The metric-kind enum is the natural seam, adding a variant later
-is cheap.
+OpenAI organization month spend establishes the cost metric. Other provider
+cost APIs can return the same metric without changing configuration or
+account selection. Cost-specific warning thresholds remain deferred until a
+provider exposes a useful budget or limit.
