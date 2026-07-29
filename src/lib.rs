@@ -4,3 +4,4 @@ pub mod dashboard;
 pub mod engine;
 pub mod model;
 pub mod providers;
+pub mod render;

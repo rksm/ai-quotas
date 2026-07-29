@@ -4,7 +4,7 @@ use chrono::{DateTime, FixedOffset};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, ValueEnum)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 #[value(rename_all = "kebab-case")]
 pub enum Service {
@@ -17,7 +17,7 @@ pub enum Service {
 
 impl fmt::Display for Service {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
+        formatter.pad(match self {
             Self::ClaudeCode => "claude-code",
             Self::Codex => "codex",
             Self::OpenaiApi => "openai-api",
