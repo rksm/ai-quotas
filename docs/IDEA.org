@@ -253,7 +253,7 @@ it emits one document per interval as JSONL.
 
 Deliberately boring stack:
 
-- *tokio + reqwest*: one async task per account, ~join_all~, 10 second
+- *tokio + reqwest*: one async task per account, ~join_all~, 30 second
   per-fetch timeout
 - *serde / serde_yaml / serde_json*: config and output
 - *clap*: CLI surface

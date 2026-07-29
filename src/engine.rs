@@ -8,7 +8,7 @@ use crate::config::AccountTarget;
 use crate::model::{EvaluatedMetric, Metric, Service};
 use crate::providers;
 
-const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub struct AccountRefresh {
