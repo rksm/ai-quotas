@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use chrono::{TimeZone, Utc};
@@ -6,8 +7,8 @@ use reqwest::header::ACCEPT;
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
-use super::{Provider, USER_AGENT, credential, environment, response_json};
-use crate::config::AccountTarget;
+use super::{Provider, USER_AGENT, credential, expand_home, response_json};
+use crate::config::{AccountTarget, CredentialSource};
 use crate::model::Metric;
 
 const BACKEND_URL: &str = "https://chatgpt.com";
@@ -21,48 +22,44 @@ pub(super) struct Codex;
 
 impl Provider for Codex {
     async fn fetch(&self, client: &Client, account: &AccountTarget) -> Result<Vec<Metric>> {
-        fetch_from(
-            client,
-            environment(&account.credentials)?,
-            AUTH_URL,
-            BACKEND_URL,
-        )
-        .await
+        fetch_from(client, &account.credentials, AUTH_URL, BACKEND_URL).await
     }
 }
 
 async fn fetch_from(
     client: &Client,
-    env: &BTreeMap<String, String>,
+    credentials: &CredentialSource,
     auth_url: &str,
     backend_url: &str,
 ) -> Result<Vec<Metric>> {
-    let (token, account_id) = if env.contains_key(OAUTH_TOKEN_VARIABLE) {
-        (
-            credential(env, OAUTH_TOKEN_VARIABLE)?,
+    let (token, account_id) = match credentials {
+        CredentialSource::File(path) => managed_credentials(path)?,
+        CredentialSource::Env(env) if env.contains_key(OAUTH_TOKEN_VARIABLE) => (
+            credential(env, OAUTH_TOKEN_VARIABLE)?.to_owned(),
             env.get(ACCOUNT_ID_VARIABLE)
                 .map(String::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .map(str::to_owned),
-        )
-    } else {
-        let token = credential(env, ACCESS_TOKEN_VARIABLE)
-            .context("set CODEX_OAUTH_TOKEN or CODEX_ACCESS_TOKEN")?;
-        if !token.starts_with("at-") {
-            bail!(
-                "CODEX_ACCESS_TOKEN must be an at- personal access token, use CODEX_OAUTH_TOKEN for a raw OAuth access token"
-            );
+        ),
+        CredentialSource::Env(env) => {
+            let token = credential(env, ACCESS_TOKEN_VARIABLE)
+                .context("set CODEX_OAUTH_TOKEN or CODEX_ACCESS_TOKEN")?;
+            if !token.starts_with("at-") {
+                bail!(
+                    "CODEX_ACCESS_TOKEN must be an at- personal access token, use CODEX_OAUTH_TOKEN for a raw OAuth access token"
+                );
+            }
+            let response = whoami_request(client, auth_url, token)
+                .send()
+                .await
+                .context("Codex account discovery request failed")?;
+            let identity: Identity =
+                response_json("Codex", "token may lack account-discovery access", response).await?;
+            (token.to_owned(), Some(identity.chatgpt_account_id))
         }
-        let response = whoami_request(client, auth_url, token)
-            .send()
-            .await
-            .context("Codex account discovery request failed")?;
-        let identity: Identity =
-            response_json("Codex", "token may lack account-discovery access", response).await?;
-        (token, Some(identity.chatgpt_account_id))
     };
 
-    let response = usage_request(client, backend_url, token, account_id.as_deref())
+    let response = usage_request(client, backend_url, &token, account_id.as_deref())
         .send()
         .await
         .context("Codex quota request failed")?;
@@ -74,6 +71,38 @@ async fn fetch_from(
     .await?;
 
     Ok(vec![parse_weekly_quota(usage)?])
+}
+
+fn managed_credentials(path: &Path) -> Result<(String, Option<String>)> {
+    let path = expand_home(path, "Codex")?;
+    let contents = fs::read_to_string(&path)
+        .with_context(|| format!("could not read Codex credentials {}", path.display()))?;
+    let credentials: CredentialsFile = serde_json::from_str(&contents)
+        .with_context(|| format!("invalid Codex credentials in {}", path.display()))?;
+    let tokens = credentials.tokens.with_context(|| {
+        format!(
+            "Codex credentials {} do not contain tokens.access_token",
+            path.display()
+        )
+    })?;
+    let token = tokens.access_token.with_context(|| {
+        format!(
+            "Codex credentials {} do not contain tokens.access_token",
+            path.display()
+        )
+    })?;
+    if token.trim().is_empty() {
+        bail!(
+            "Codex credentials {} contain an empty tokens.access_token",
+            path.display()
+        );
+    }
+    let account_id = tokens
+        .account_id
+        .map(|account_id| account_id.trim().to_owned())
+        .filter(|account_id| !account_id.is_empty());
+
+    Ok((token.trim().to_owned(), account_id))
 }
 
 fn whoami_request(client: &Client, base_url: &str, token: &str) -> RequestBuilder {
@@ -143,6 +172,17 @@ struct Identity {
 }
 
 #[derive(Debug, Deserialize)]
+struct CredentialsFile {
+    tokens: Option<ManagedTokens>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManagedTokens {
+    access_token: Option<String>,
+    account_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct UsageResponse {
     rate_limit: Option<RateLimit>,
 }
@@ -163,13 +203,22 @@ struct RateLimitWindow {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use chrono::{TimeZone, Utc};
     use reqwest::Client;
     use serde_json::json;
 
-    use super::{UsageResponse, fetch_from, parse_weekly_quota, usage_request, whoami_request};
+    use super::{
+        UsageResponse, fetch_from, managed_credentials, parse_weekly_quota, usage_request,
+        whoami_request,
+    };
+    use crate::config::CredentialSource;
     use crate::model::Metric;
+
+    static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn selects_the_seven_day_window_by_duration() {
@@ -239,14 +288,14 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_non_pat_values_in_the_access_token_variable() {
-        let env = BTreeMap::from([(
+        let credentials = CredentialSource::Env(BTreeMap::from([(
             "CODEX_ACCESS_TOKEN".to_owned(),
             "oauth-access-token".to_owned(),
-        )]);
+        )]));
 
         let error = fetch_from(
             &Client::new(),
-            &env,
+            &credentials,
             "https://auth.example",
             "https://chatgpt.example",
         )
@@ -258,5 +307,61 @@ mod tests {
                 .to_string()
                 .contains("must be an at- personal access token")
         );
+    }
+
+    #[test]
+    fn reads_the_latest_access_token_from_a_managed_credentials_file() {
+        let path = temporary_path();
+        write_credentials(&path, "first-token", "account");
+
+        assert_eq!(
+            managed_credentials(&path).unwrap(),
+            ("first-token".to_owned(), Some("account".to_owned()))
+        );
+
+        write_credentials(&path, "refreshed-token", "account");
+
+        assert_eq!(
+            managed_credentials(&path).unwrap(),
+            ("refreshed-token".to_owned(), Some("account".to_owned()))
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reports_invalid_credentials_without_exposing_their_contents() {
+        let path = temporary_path();
+        fs::write(&path, r#"{"secret":"do-not-repeat"}"#).unwrap();
+
+        let error = managed_credentials(&path).expect_err("missing access token should fail");
+        let message = format!("{error:#}");
+
+        assert!(message.contains("tokens.access_token"));
+        assert!(!message.contains("do-not-repeat"));
+        fs::remove_file(path).unwrap();
+    }
+
+    fn temporary_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "ai-quotas-codex-credentials-{}-{}.json",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn write_credentials(path: &Path, token: &str, account_id: &str) {
+        fs::write(
+            path,
+            serde_json::to_vec(&json!({
+                "tokens": {
+                    "access_token": token,
+                    "refresh_token": "ignored",
+                    "account_id": account_id
+                },
+                "last_refresh": "ignored"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
     }
 }

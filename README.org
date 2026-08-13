@@ -54,6 +54,7 @@ credential files. Restrict its filesystem permissions accordingly.
 |-------------+---------------------------------------------------+-------------|
 | claude-code | ~credentials_file~                                | Preferred on Linux and Windows. A Claude Code managed ~.credentials.json~ containing ~claudeAiOauth.accessToken~ with the ~user:profile~ scope. |
 | claude-code | ~env.CLAUDE_CODE_OAUTH_TOKEN~                     | A full OAuth access token with the ~user:profile~ scope. A ~claude setup-token~ token is normally inference-only and cannot read usage. |
+| codex       | ~credentials_file~                                | Preferred for managed ChatGPT login. A Codex ~auth.json~ containing ~tokens.access_token~ and, when available, ~tokens.account_id~. |
 | codex       | ~CODEX_OAUTH_TOKEN~, optional ~CODEX_ACCOUNT_ID~  | The managed-login access token. Set the account ID for reliable routing when the login belongs to multiple workspaces. |
 | codex       | ~CODEX_ACCESS_TOKEN~                              | An ~at-~ personal access token. The CLI discovers its ChatGPT account ID. |
 | deepgram    | ~DEEPGRAM_API_KEY~                                | A project-scoped key with ~project:read~ and ~billing:read~. |
@@ -61,11 +62,15 @@ credential files. Restrict its filesystem permissions accordingly.
 | runpod      | ~RUNPOD_API_KEY~                                  | A Runpod API key permitted to read GraphQL account data. |
 | openai-api  | ~OPENAI_ADMIN_KEY~                                | An organization Admin API key. The provider reads current UTC month costs and an optional hard spend limit. |
 
-A Claude Code account must configure exactly one of ~env~ or
-~credentials_file~. Credential-file paths must be absolute or begin with
-=~/=. The file is reread for every fetch, so a token refreshed by Claude
-Code is picked up on the next run or watch interval. ~ai-quotas~ never
-modifies or refreshes the file.
+Each account must configure exactly one of ~env~ or ~credentials_file~.
+Claude Code and Codex support credential files. Their paths must be absolute
+or start with =~/=. The provider rereads the file for every
+fetch, so it picks up tokens refreshed by the owning CLI on the next run or
+watch interval. ~ai-quotas~ never modifies or refreshes the file.
+
+Codex stores its managed credentials in ~~/.codex/auth.json~ by default.
+For separate Codex homes, point each account at the corresponding
+~auth.json~ file.
 
 Claude Code stores managed credentials in the macOS Keychain rather than a
 JSON file. Use the environment-token source on macOS.

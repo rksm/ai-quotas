@@ -12,7 +12,7 @@ human-readable table or as JSON.
 
 ** Core design idea
 
-The binary ships with hard-coded provider modules, one per service. The YAML
+The binary contains hard-coded provider modules, one per service. The YAML
 config selects services, names accounts, supplies credentials, and can
 anchor an estimated OpenAI balance. All knowledge about how to query a
 service lives in exactly one Rust module.
@@ -62,16 +62,17 @@ Each account entry chooses exactly one credential source:
 
 - ~env~ contains literal values. The provider either reads the variables
   directly or injects them into a subprocess for a CLI fallback.
-- ~credentials_file~ is supported for Claude Code on Linux and Windows. It
-  names an absolute Claude Code ~.credentials.json~ path or one beginning
-  with =~/=. The provider reads ~claudeAiOauth.accessToken~ on every fetch.
+- Claude Code and Codex support ~credentials_file~. It names an absolute
+  managed credential path or one starting with =~/=. The Claude
+  Code provider reads ~claudeAiOauth.accessToken~. The Codex provider reads
+  ~tokens.access_token~ and ~tokens.account_id~.
 
 The app never caches, refreshes, or modifies a managed credential file.
-Claude Code owns refresh-token rotation, and the next run or watch interval
-picks up a newly written access token. OAuth expiry and malformed or missing
-files are isolated as clear per-account errors. On macOS, where Claude Code
-stores managed credentials in the Keychain, use the environment-token
-source.
+The owning CLI handles refresh-token rotation, and the next run or watch
+interval picks up a newly written access token. OAuth expiry and malformed
+or missing files produce clear per-account errors. On macOS, where
+Claude Code stores managed credentials in the Keychain, use the
+environment-token source.
 
 Secrets in YAML are acceptable because the app has no secret store of its
 own. Protect the config and every referenced credential file accordingly.
@@ -117,8 +118,7 @@ services:
   codex:
     accounts:
       - name: main
-        env:
-          CODEX_OAUTH_TOKEN: ...
+        credentials_file: ~/.codex/auth.json
   openai-api:
     accounts:
       - name: main

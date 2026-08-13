@@ -6,6 +6,8 @@ mod openai_api;
 mod runpod;
 
 use std::collections::BTreeMap;
+use std::env;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use reqwest::{Client, Response, StatusCode};
@@ -52,6 +54,25 @@ fn credential<'a>(env: &'a BTreeMap<String, String>, variable: &str) -> Result<&
         bail!("{variable} is empty");
     }
     Ok(value)
+}
+
+fn expand_home(path: &Path, service: &str) -> Result<PathBuf> {
+    let home = env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    expand_home_from(path, home.as_deref(), service)
+}
+
+fn expand_home_from(path: &Path, home: Option<&Path>, service: &str) -> Result<PathBuf> {
+    let path_text = path
+        .to_str()
+        .with_context(|| format!("{service} credentials path is not valid UTF-8"))?;
+    let Some(relative) = path_text.strip_prefix("~/") else {
+        return Ok(path.to_owned());
+    };
+    let home =
+        home.with_context(|| format!("HOME is not set, cannot expand {service} credentials path"))?;
+    Ok(home.join(relative))
 }
 
 async fn response_json<T>(service: &str, forbidden_hint: &str, response: Response) -> Result<T>

@@ -1,7 +1,4 @@
-use std::env;
 use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, TimeZone, Utc};
@@ -9,7 +6,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
-use super::{Provider, USER_AGENT, credential, response_json};
+use super::{Provider, USER_AGENT, credential, expand_home, response_json};
 use crate::config::{AccountTarget, CredentialSource};
 use crate::model::Metric;
 
@@ -50,7 +47,7 @@ fn access_token(credentials: &CredentialSource) -> Result<String> {
         }
         CredentialSource::File(path) => path,
     };
-    let path = expand_home(path)?;
+    let path = expand_home(path, "Claude Code")?;
     let contents = fs::read_to_string(&path)
         .with_context(|| format!("could not read Claude Code credentials {}", path.display()))?;
     let credentials: CredentialsFile = serde_json::from_str(&contents)
@@ -72,24 +69,6 @@ fn access_token(credentials: &CredentialSource) -> Result<String> {
     }
 
     Ok(token.trim().to_owned())
-}
-
-fn expand_home(path: &Path) -> Result<PathBuf> {
-    let home = env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    expand_home_from(path, home.as_deref())
-}
-
-fn expand_home_from(path: &Path, home: Option<&Path>) -> Result<PathBuf> {
-    let Some(path_text) = path.to_str() else {
-        bail!("Claude Code credentials path is not valid UTF-8");
-    };
-    let Some(relative) = path_text.strip_prefix("~/") else {
-        return Ok(path.to_owned());
-    };
-    let home = home.context("HOME is not set, cannot expand Claude Code credentials path")?;
-    Ok(home.join(relative))
 }
 
 fn usage_request(client: &Client, base_url: &str, token: &str) -> RequestBuilder {
@@ -258,9 +237,10 @@ mod tests {
     use reqwest::Client;
     use serde_json::json;
 
-    use super::{UsageResponse, access_token, expand_home_from, parse_usage, usage_request};
+    use super::{UsageResponse, access_token, parse_usage, usage_request};
     use crate::config::CredentialSource;
     use crate::model::Metric;
+    use crate::providers::expand_home_from;
 
     static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
@@ -402,7 +382,7 @@ mod tests {
         let home = Path::new("/home/example");
         let path = Path::new("~/.claude-work/.credentials.json");
 
-        let expanded = expand_home_from(path, Some(home)).unwrap();
+        let expanded = expand_home_from(path, Some(home), "Claude Code").unwrap();
 
         assert_eq!(
             expanded,

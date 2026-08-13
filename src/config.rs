@@ -207,12 +207,12 @@ fn validate_accounts(service: Service, accounts: &[AccountConfig]) -> Result<()>
         }
         match (&account.env, &account.credentials_file) {
             (Some(_), None) => {}
-            (None, Some(path)) if service == Service::ClaudeCode => {
+            (None, Some(path)) if matches!(service, Service::ClaudeCode | Service::Codex) => {
                 validate_credentials_path(service, &account.name, path)?;
             }
             (None, Some(_)) => {
                 bail!(
-                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code",
+                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code and codex",
                     account.name
                 );
             }
@@ -407,8 +407,8 @@ services:
     }
 
     #[test]
-    fn rejects_credentials_file_for_other_services() {
-        let error = Config::from_yaml(
+    fn accepts_credentials_file_for_codex() {
+        let config = Config::from_yaml(
             r"
 services:
   codex:
@@ -417,10 +417,35 @@ services:
         credentials_file: /home/example/.codex/auth.json
 ",
         )
+        .expect("Codex credentials file should be valid");
+
+        assert_eq!(
+            config.services[&Service::Codex].accounts[0]
+                .credentials_file
+                .as_deref(),
+            Some(std::path::Path::new("/home/example/.codex/auth.json"))
+        );
+    }
+
+    #[test]
+    fn rejects_credentials_file_for_other_services() {
+        let error = Config::from_yaml(
+            r"
+services:
+  deepgram:
+    accounts:
+      - name: main
+        credentials_file: /home/example/.config/deepgram/credentials.json
+",
+        )
         .err()
         .expect("unsupported credentials file should fail");
 
-        assert!(error.to_string().contains("only supported by claude-code"));
+        assert!(
+            error
+                .to_string()
+                .contains("only supported by claude-code and codex")
+        );
     }
 
     #[test]
