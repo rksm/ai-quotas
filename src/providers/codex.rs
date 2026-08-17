@@ -1,14 +1,11 @@
-use std::fs;
-use std::path::Path;
-
 use anyhow::{Context, Result, bail};
 use chrono::{TimeZone, Utc};
 use reqwest::header::ACCEPT;
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
-use super::{Provider, USER_AGENT, credential, expand_home, response_json};
-use crate::config::{AccountTarget, CredentialSource};
+use super::{Provider, USER_AGENT, credential, response_json};
+use crate::config::{AccountTarget, CredentialSource, CredentialsFile};
 use crate::model::Metric;
 
 const BACKEND_URL: &str = "https://chatgpt.com";
@@ -33,7 +30,7 @@ async fn fetch_from(
     backend_url: &str,
 ) -> Result<Vec<Metric>> {
     let (token, account_id) = match credentials {
-        CredentialSource::File(path) => managed_credentials(path)?,
+        CredentialSource::File(file) => managed_credentials(file).await?,
         CredentialSource::Env(env) if env.contains_key(OAUTH_TOKEN_VARIABLE) => (
             credential(env, OAUTH_TOKEN_VARIABLE)?.to_owned(),
             env.get(ACCOUNT_ID_VARIABLE)
@@ -73,29 +70,18 @@ async fn fetch_from(
     Ok(vec![parse_weekly_quota(usage)?])
 }
 
-fn managed_credentials(path: &Path) -> Result<(String, Option<String>)> {
-    let path = expand_home(path, "Codex")?;
-    let contents = fs::read_to_string(&path)
-        .with_context(|| format!("could not read Codex credentials {}", path.display()))?;
-    let credentials: CredentialsFile = serde_json::from_str(&contents)
-        .with_context(|| format!("invalid Codex credentials in {}", path.display()))?;
-    let tokens = credentials.tokens.with_context(|| {
-        format!(
-            "Codex credentials {} do not contain tokens.access_token",
-            path.display()
-        )
-    })?;
-    let token = tokens.access_token.with_context(|| {
-        format!(
-            "Codex credentials {} do not contain tokens.access_token",
-            path.display()
-        )
-    })?;
+async fn managed_credentials(file: &CredentialsFile) -> Result<(String, Option<String>)> {
+    let contents = file.read("Codex").await?;
+    let credentials: CredentialsJson = serde_json::from_str(&contents)
+        .with_context(|| format!("invalid Codex credentials in {file}"))?;
+    let tokens = credentials
+        .tokens
+        .with_context(|| format!("Codex credentials {file} do not contain tokens.access_token"))?;
+    let token = tokens
+        .access_token
+        .with_context(|| format!("Codex credentials {file} do not contain tokens.access_token"))?;
     if token.trim().is_empty() {
-        bail!(
-            "Codex credentials {} contain an empty tokens.access_token",
-            path.display()
-        );
+        bail!("Codex credentials {file} contain an empty tokens.access_token");
     }
     let account_id = tokens
         .account_id
@@ -172,7 +158,7 @@ struct Identity {
 }
 
 #[derive(Debug, Deserialize)]
-struct CredentialsFile {
+struct CredentialsJson {
     tokens: Option<ManagedTokens>,
 }
 
@@ -215,7 +201,7 @@ mod tests {
         UsageResponse, fetch_from, managed_credentials, parse_weekly_quota, usage_request,
         whoami_request,
     };
-    use crate::config::CredentialSource;
+    use crate::config::{CredentialSource, CredentialsFile};
     use crate::model::Metric;
 
     static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
@@ -309,36 +295,42 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reads_the_latest_access_token_from_a_managed_credentials_file() {
+    #[tokio::test]
+    async fn reads_the_latest_access_token_from_a_managed_credentials_file() {
         let path = temporary_path();
         write_credentials(&path, "first-token", "account");
 
         assert_eq!(
-            managed_credentials(&path).unwrap(),
+            managed_credentials(&local_file(&path)).await.unwrap(),
             ("first-token".to_owned(), Some("account".to_owned()))
         );
 
         write_credentials(&path, "refreshed-token", "account");
 
         assert_eq!(
-            managed_credentials(&path).unwrap(),
+            managed_credentials(&local_file(&path)).await.unwrap(),
             ("refreshed-token".to_owned(), Some("account".to_owned()))
         );
         fs::remove_file(path).unwrap();
     }
 
-    #[test]
-    fn reports_invalid_credentials_without_exposing_their_contents() {
+    #[tokio::test]
+    async fn reports_invalid_credentials_without_exposing_their_contents() {
         let path = temporary_path();
         fs::write(&path, r#"{"secret":"do-not-repeat"}"#).unwrap();
 
-        let error = managed_credentials(&path).expect_err("missing access token should fail");
+        let error = managed_credentials(&local_file(&path))
+            .await
+            .expect_err("missing access token should fail");
         let message = format!("{error:#}");
 
         assert!(message.contains("tokens.access_token"));
         assert!(!message.contains("do-not-repeat"));
         fs::remove_file(path).unwrap();
+    }
+
+    fn local_file(path: &Path) -> CredentialsFile {
+        CredentialsFile::from(path.to_str().unwrap().to_owned())
     }
 
     fn temporary_path() -> PathBuf {

@@ -62,9 +62,11 @@ Each account entry chooses exactly one credential source:
 
 - ~env~ contains literal values. The provider either reads the variables
   directly or injects them into a subprocess for a CLI fallback.
-- Claude Code and Codex support ~credentials_file~. It names an absolute
-  managed credential path or one starting with =~/=. The Claude
-  Code provider reads ~claudeAiOauth.accessToken~. The Codex provider reads
+- Claude Code and Codex support ~credentials_file~. It names a managed
+  credential file: an absolute local path, one starting with =~/=, or an
+  scp-style ~host:path~ reference read over SSH. A relative remote path
+  resolves against the remote home directory. The Claude Code provider
+  reads ~claudeAiOauth.accessToken~. The Codex provider reads
   ~tokens.access_token~ and ~tokens.account_id~.
 
 The app never caches, refreshes, or modifies a managed credential file.
@@ -114,7 +116,7 @@ services:
       - name: personal
         credentials_file: ~/.claude/.credentials.json
       - name: work
-        credentials_file: ~/.claude-work/.credentials.json
+        credentials_file: agent-1:.claude/.credentials.json  # over SSH
   codex:
     accounts:
       - name: main

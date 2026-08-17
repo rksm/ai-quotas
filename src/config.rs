@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashSet};
-use std::env;
-use std::fs;
+use std::fmt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, FixedOffset};
@@ -28,7 +29,121 @@ pub struct AccountTarget {
 
 pub enum CredentialSource {
     Env(BTreeMap<String, String>),
-    File(PathBuf),
+    File(CredentialsFile),
+}
+
+/// A managed credentials file on this machine or on a host reached over SSH.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CredentialsFile {
+    pub host: Option<String>,
+    pub path: String,
+}
+
+impl CredentialsFile {
+    /// Read the current file contents, locally or over SSH.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the file cannot be read or the SSH command
+    /// fails.
+    pub async fn read(&self, service: &str) -> Result<String> {
+        let Some(host) = &self.host else {
+            let path = expand_home(Path::new(&self.path), service)?;
+            return fs::read_to_string(&path).with_context(|| {
+                format!("could not read {service} credentials {}", path.display())
+            });
+        };
+
+        // A null stdin keeps SSH from consuming terminal input in watch mode,
+        // and BatchMode turns any interactive prompt into a fast failure.
+        let output = tokio::process::Command::new("ssh")
+            .args(ssh_read_args(host, &self.path))
+            .stdin(Stdio::null())
+            .output()
+            .await
+            .with_context(|| format!("could not run ssh to read {service} credentials {self}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "could not read {service} credentials {self}: {}",
+                stderr.trim().lines().next_back().unwrap_or("ssh failed")
+            );
+        }
+        String::from_utf8(output.stdout)
+            .map_err(|_| anyhow::anyhow!("{service} credentials {self} are not valid UTF-8"))
+    }
+}
+
+impl From<String> for CredentialsFile {
+    /// Interpret scp-style references: a colon before the first slash marks a
+    /// `host:path` remote file unless the text starts with `/` or `~`.
+    fn from(text: String) -> Self {
+        let leading = text.split('/').next().unwrap_or("");
+        if text.starts_with('/') || text.starts_with('~') || !leading.contains(':') {
+            return Self {
+                host: None,
+                path: text,
+            };
+        }
+        let (host, path) = text.split_once(':').expect("leading segment has a colon");
+        Self {
+            host: Some(host.to_owned()),
+            path: path.to_owned(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CredentialsFile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::from(String::deserialize(deserializer)?))
+    }
+}
+
+impl fmt::Display for CredentialsFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.host {
+            Some(host) => write!(f, "{host}:{}", self.path),
+            None => f.write_str(&self.path),
+        }
+    }
+}
+
+fn ssh_read_args(host: &str, path: &str) -> [String; 6] {
+    // SSH joins the command words and runs them through the remote shell, so
+    // the path needs quoting. `cat` runs in the remote home directory, which
+    // makes relative and `~/` paths equivalent.
+    let path = path.strip_prefix("~/").unwrap_or(path);
+    let quoted = format!("'{}'", path.replace('\'', r"'\''"));
+    [
+        "-o".to_owned(),
+        "BatchMode=yes".to_owned(),
+        "--".to_owned(),
+        host.to_owned(),
+        "cat".to_owned(),
+        quoted,
+    ]
+}
+
+fn expand_home(path: &Path, service: &str) -> Result<PathBuf> {
+    let home = env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    expand_home_from(path, home.as_deref(), service)
+}
+
+fn expand_home_from(path: &Path, home: Option<&Path>, service: &str) -> Result<PathBuf> {
+    let path_text = path
+        .to_str()
+        .with_context(|| format!("{service} credentials path is not valid UTF-8"))?;
+    let Some(relative) = path_text.strip_prefix("~/") else {
+        return Ok(path.to_owned());
+    };
+    let home =
+        home.with_context(|| format!("HOME is not set, cannot expand {service} credentials path"))?;
+    Ok(home.join(relative))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -44,7 +159,7 @@ pub struct BalanceAnchor {
 pub struct AccountConfig {
     pub name: String,
     pub env: Option<BTreeMap<String, String>>,
-    pub credentials_file: Option<PathBuf>,
+    pub credentials_file: Option<CredentialsFile>,
     pub balance: Option<BalanceAnchor>,
 }
 
@@ -207,8 +322,8 @@ fn validate_accounts(service: Service, accounts: &[AccountConfig]) -> Result<()>
         }
         match (&account.env, &account.credentials_file) {
             (Some(_), None) => {}
-            (None, Some(path)) if matches!(service, Service::ClaudeCode | Service::Codex) => {
-                validate_credentials_path(service, &account.name, path)?;
+            (None, Some(file)) if matches!(service, Service::ClaudeCode | Service::Codex) => {
+                validate_credentials_file(service, &account.name, file)?;
             }
             (None, Some(_)) => {
                 bail!(
@@ -251,17 +366,26 @@ fn validate_balance(
     Ok(())
 }
 
-fn validate_credentials_path(service: Service, account: &str, path: &Path) -> Result<()> {
-    let path_text = path
-        .to_str()
-        .context("credentials_file path is not valid UTF-8")?;
-    if path_text.is_empty() {
+fn validate_credentials_file(
+    service: Service,
+    account: &str,
+    file: &CredentialsFile,
+) -> Result<()> {
+    if file.path.is_empty() {
         bail!("services.{service}.accounts entry {account:?} has an empty credentials_file path");
     }
-    if !path.is_absolute() && !path_text.starts_with("~/") {
-        bail!(
-            "services.{service}.accounts entry {account:?} credentials_file must be absolute or start with ~/"
-        );
+    match &file.host {
+        Some(host) if host.trim().is_empty() => {
+            bail!(
+                "services.{service}.accounts entry {account:?} has an empty credentials_file host"
+            )
+        }
+        // A remote path may be relative; SSH resolves it in the remote home.
+        Some(_) => {}
+        None if Path::new(&file.path).is_absolute() || file.path.starts_with("~/") => {}
+        None => bail!(
+            "services.{service}.accounts entry {account:?} credentials_file must be absolute, start with ~/, or use host:path"
+        ),
     }
     Ok(())
 }
@@ -286,7 +410,7 @@ fn validate_thresholds(thresholds: Thresholds, location: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, CredentialsFile, ssh_read_args};
     use crate::model::Service;
 
     const CONFIG: &str = r"
@@ -327,13 +451,13 @@ services:
         assert_close(deepgram.thresholds.balance_critical, 25.0);
         assert_close(runpod.thresholds.balance_critical, 10.0);
         assert_eq!(claude.accounts[0].name, "personal");
-        assert!(matches!(
-            claude.accounts[1].credentials_file.as_deref(),
-            Some(path)
-                if path == std::path::Path::new(
-                    "/home/example/.claude-work/.credentials.json"
-                )
-        ));
+        assert_eq!(
+            claude.accounts[1].credentials_file,
+            Some(CredentialsFile {
+                host: None,
+                path: "/home/example/.claude-work/.credentials.json".to_owned(),
+            })
+        );
     }
 
     #[test]
@@ -420,10 +544,11 @@ services:
         .expect("Codex credentials file should be valid");
 
         assert_eq!(
-            config.services[&Service::Codex].accounts[0]
-                .credentials_file
-                .as_deref(),
-            Some(std::path::Path::new("/home/example/.codex/auth.json"))
+            config.services[&Service::Codex].accounts[0].credentials_file,
+            Some(CredentialsFile {
+                host: None,
+                path: "/home/example/.codex/auth.json".to_owned(),
+            })
         );
     }
 
@@ -508,7 +633,102 @@ services:
         assert!(
             error
                 .to_string()
-                .contains("must be absolute or start with ~/")
+                .contains("must be absolute, start with ~/, or use host:path")
+        );
+    }
+
+    #[test]
+    fn parses_remote_credentials_references() {
+        let config = Config::from_yaml(
+            r"
+services:
+  claude-code:
+    accounts:
+      - name: work
+        credentials_file: agent-1:.claude/.credentials.json
+",
+        )
+        .expect("remote credentials reference should be valid");
+
+        assert_eq!(
+            config.services[&Service::ClaudeCode].accounts[0].credentials_file,
+            Some(CredentialsFile {
+                host: Some("agent-1".to_owned()),
+                path: ".claude/.credentials.json".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn keeps_colons_after_a_slash_or_home_prefix_local() {
+        assert_eq!(
+            CredentialsFile::from("~/odd:name/auth.json".to_owned()).host,
+            None
+        );
+        assert_eq!(
+            CredentialsFile::from("/srv/odd:name/auth.json".to_owned()).host,
+            None
+        );
+        assert_eq!(
+            CredentialsFile::from("robert@agent-1:/home/robert/.codex/auth.json".to_owned()),
+            CredentialsFile {
+                host: Some("robert@agent-1".to_owned()),
+                path: "/home/robert/.codex/auth.json".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_remote_references_without_a_path_or_host() {
+        for (reference, message) in [
+            ("agent-1:", "empty credentials_file path"),
+            (":.claude/.credentials.json", "empty credentials_file host"),
+        ] {
+            let error = Config::from_yaml(&format!(
+                r"
+services:
+  claude-code:
+    accounts:
+      - name: work
+        credentials_file: {reference:?}
+"
+            ))
+            .err()
+            .expect("incomplete remote reference should fail");
+
+            assert!(error.to_string().contains(message), "for {reference:?}");
+        }
+    }
+
+    #[test]
+    fn expands_a_home_relative_credentials_path() {
+        let expanded = super::expand_home_from(
+            std::path::Path::new("~/.claude-work/.credentials.json"),
+            Some(std::path::Path::new("/home/example")),
+            "Claude Code",
+        )
+        .unwrap();
+
+        assert_eq!(
+            expanded,
+            std::path::Path::new("/home/example/.claude-work/.credentials.json")
+        );
+    }
+
+    #[test]
+    fn quotes_the_remote_path_for_the_ssh_command() {
+        let args = ssh_read_args("agent-1", "~/it's/auth.json");
+
+        assert_eq!(
+            args,
+            [
+                "-o",
+                "BatchMode=yes",
+                "--",
+                "agent-1",
+                "cat",
+                r"'it'\''s/auth.json'",
+            ]
         );
     }
 

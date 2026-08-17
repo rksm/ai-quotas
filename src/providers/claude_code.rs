@@ -1,12 +1,10 @@
-use std::fs;
-
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, TimeZone, Utc};
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
-use super::{Provider, USER_AGENT, credential, expand_home, response_json};
+use super::{Provider, USER_AGENT, credential, response_json};
 use crate::config::{AccountTarget, CredentialSource};
 use crate::model::Metric;
 
@@ -26,7 +24,7 @@ async fn fetch_from(
     credentials: &CredentialSource,
     base_url: &str,
 ) -> Result<Vec<Metric>> {
-    let token = access_token(credentials)?;
+    let token = access_token(credentials).await?;
     let response = usage_request(client, base_url, &token)
         .send()
         .await
@@ -40,32 +38,24 @@ async fn fetch_from(
     parse_usage(usage)
 }
 
-fn access_token(credentials: &CredentialSource) -> Result<String> {
-    let path = match credentials {
+async fn access_token(credentials: &CredentialSource) -> Result<String> {
+    let file = match credentials {
         CredentialSource::Env(env) => {
             return credential(env, TOKEN_VARIABLE).map(str::to_owned);
         }
-        CredentialSource::File(path) => path,
+        CredentialSource::File(file) => file,
     };
-    let path = expand_home(path, "Claude Code")?;
-    let contents = fs::read_to_string(&path)
-        .with_context(|| format!("could not read Claude Code credentials {}", path.display()))?;
-    let credentials: CredentialsFile = serde_json::from_str(&contents)
-        .with_context(|| format!("invalid Claude Code credentials in {}", path.display()))?;
+    let contents = file.read("Claude Code").await?;
+    let credentials: CredentialsJson = serde_json::from_str(&contents)
+        .with_context(|| format!("invalid Claude Code credentials in {file}"))?;
     let token = credentials
         .claude_ai_oauth
         .and_then(|oauth| oauth.access_token)
         .with_context(|| {
-            format!(
-                "Claude Code credentials {} do not contain claudeAiOauth.accessToken",
-                path.display()
-            )
+            format!("Claude Code credentials {file} do not contain claudeAiOauth.accessToken")
         })?;
     if token.trim().is_empty() {
-        bail!(
-            "Claude Code credentials {} contain an empty claudeAiOauth.accessToken",
-            path.display()
-        );
+        bail!("Claude Code credentials {file} contain an empty claudeAiOauth.accessToken");
     }
 
     Ok(token.trim().to_owned())
@@ -162,7 +152,7 @@ fn metric(
 }
 
 #[derive(Debug, Deserialize)]
-struct CredentialsFile {
+struct CredentialsJson {
     #[serde(rename = "claudeAiOauth")]
     claude_ai_oauth: Option<ClaudeAiOauth>,
 }
@@ -238,9 +228,8 @@ mod tests {
     use serde_json::json;
 
     use super::{UsageResponse, access_token, parse_usage, usage_request};
-    use crate::config::CredentialSource;
+    use crate::config::{CredentialSource, CredentialsFile};
     use crate::model::Metric;
-    use crate::providers::expand_home_from;
 
     static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
@@ -343,33 +332,35 @@ mod tests {
         assert_eq!(request.headers()["anthropic-beta"], "oauth-2025-04-20");
     }
 
-    #[test]
-    fn reads_the_latest_access_token_from_a_managed_credentials_file() {
+    #[tokio::test]
+    async fn reads_the_latest_access_token_from_a_managed_credentials_file() {
         let path = temporary_path();
-        let credentials = CredentialSource::File(path.clone());
+        let credentials = CredentialSource::File(local_file(&path));
         write_credentials(&path, "first-token");
 
         assert_eq!(
-            access_token(&credentials).unwrap(),
+            access_token(&credentials).await.unwrap(),
             "first-token".to_owned()
         );
 
         write_credentials(&path, "refreshed-token");
 
         assert_eq!(
-            access_token(&credentials).unwrap(),
+            access_token(&credentials).await.unwrap(),
             "refreshed-token".to_owned()
         );
         fs::remove_file(path).unwrap();
     }
 
-    #[test]
-    fn reports_invalid_credentials_without_exposing_their_contents() {
+    #[tokio::test]
+    async fn reports_invalid_credentials_without_exposing_their_contents() {
         let path = temporary_path();
-        let credentials = CredentialSource::File(path.clone());
+        let credentials = CredentialSource::File(local_file(&path));
         fs::write(&path, r#"{"secret":"do-not-repeat"}"#).unwrap();
 
-        let error = access_token(&credentials).expect_err("missing access token should fail");
+        let error = access_token(&credentials)
+            .await
+            .expect_err("missing access token should fail");
         let message = format!("{error:#}");
 
         assert!(message.contains("claudeAiOauth.accessToken"));
@@ -377,17 +368,8 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
-    #[test]
-    fn expands_a_home_relative_credentials_path() {
-        let home = Path::new("/home/example");
-        let path = Path::new("~/.claude-work/.credentials.json");
-
-        let expanded = expand_home_from(path, Some(home), "Claude Code").unwrap();
-
-        assert_eq!(
-            expanded,
-            Path::new("/home/example/.claude-work/.credentials.json")
-        );
+    fn local_file(path: &Path) -> CredentialsFile {
+        CredentialsFile::from(path.to_str().unwrap().to_owned())
     }
 
     fn temporary_path() -> PathBuf {

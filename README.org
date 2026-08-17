@@ -63,10 +63,17 @@ credential files. Restrict its filesystem permissions accordingly.
 | openai-api  | ~OPENAI_ADMIN_KEY~                                | An organization Admin API key. The provider reads current UTC month costs and an optional hard spend limit. |
 
 Each account must configure exactly one of ~env~ or ~credentials_file~.
-Claude Code and Codex support credential files. Their paths must be absolute
-or start with =~/=. The provider rereads the file for every
+Claude Code and Codex support credential files. A local path must be
+absolute or start with =~/=. The provider rereads the file for every
 fetch, so it picks up tokens refreshed by the owning CLI on the next run or
 watch interval. ~ai-quotas~ never modifies or refreshes the file.
+
+A credential file can also live on another machine. An scp-style reference
+such as ~agent-1:.claude/.credentials.json~ reads the file over SSH on
+every fetch. The host part is any SSH destination, including ~user@host~
+and =~/.ssh/config= aliases. A relative remote path resolves against the
+remote home directory. SSH runs non-interactively (~BatchMode~), so the
+host must authenticate through keys or an agent.
 
 Codex stores its managed credentials in ~~/.codex/auth.json~ by default.
 For separate Codex homes, point each account at the corresponding
