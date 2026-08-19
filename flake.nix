@@ -44,7 +44,6 @@
           ] ++ (if pkgs.stdenv.isDarwin then [ libiconv ] else [ ]);
 
           packages = with pkgs; [
-            ai-quotas
             rust-analyzer
             (rustfmt.override { asNightly = true; })
           ];
