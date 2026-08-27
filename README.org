@@ -52,9 +52,9 @@ credential files. Restrict its filesystem permissions accordingly.
 
 | Service     | Credential source                                 | Requirement |
 |-------------+---------------------------------------------------+-------------|
-| claude-code | ~credentials_file~                                | Preferred on Linux and Windows. A Claude Code managed ~.credentials.json~ containing ~claudeAiOauth.accessToken~ with the ~user:profile~ scope. |
+| claude-code | ~credentials_file~                                | Claude Code: ~claudeAiOauth.accessToken~. CLIProxyAPI: top-level ~access_token~. The token needs the ~user:profile~ scope. |
 | claude-code | ~env.CLAUDE_CODE_OAUTH_TOKEN~                     | A full OAuth access token with the ~user:profile~ scope. A ~claude setup-token~ token is normally inference-only and cannot read usage. |
-| codex       | ~credentials_file~                                | Preferred for managed ChatGPT login. A Codex ~auth.json~ containing ~tokens.access_token~ and, when available, ~tokens.account_id~. |
+| codex       | ~credentials_file~                                | Codex: ~tokens.access_token~ and optional ~tokens.account_id~. CLIProxyAPI: the same fields at the top level. |
 | codex       | ~CODEX_OAUTH_TOKEN~, optional ~CODEX_ACCOUNT_ID~  | The managed-login access token. Set the account ID for reliable routing when the login belongs to multiple workspaces. |
 | codex       | ~CODEX_ACCESS_TOKEN~                              | An ~at-~ personal access token. The CLI discovers its ChatGPT account ID. |
 | deepgram    | ~DEEPGRAM_API_KEY~                                | A project-scoped key with ~project:read~ and ~billing:read~. |
@@ -67,6 +67,8 @@ Claude Code and Codex support credential files. A local path must be
 absolute or start with =~/=. The provider rereads the file for every
 fetch, so it picks up tokens refreshed by the owning CLI on the next run or
 watch interval. ~ai-quotas~ never modifies or refreshes the file.
+CLIProxyAPI auth files store ~access_token~ at the top level. Codex auth
+files can also store ~account_id~ at the top level.
 
 A credential file can also live on another machine. An scp-style reference
 such as ~agent-1:.claude/.credentials.json~ reads the file over SSH on

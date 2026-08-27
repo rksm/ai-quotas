@@ -51,11 +51,14 @@ async fn access_token(credentials: &CredentialSource) -> Result<String> {
     let token = credentials
         .claude_ai_oauth
         .and_then(|oauth| oauth.access_token)
+        .or(credentials.access_token)
         .with_context(|| {
-            format!("Claude Code credentials {file} do not contain claudeAiOauth.accessToken")
+            format!(
+                "Claude Code credentials {file} do not contain claudeAiOauth.accessToken or access_token"
+            )
         })?;
     if token.trim().is_empty() {
-        bail!("Claude Code credentials {file} contain an empty claudeAiOauth.accessToken");
+        bail!("Claude Code credentials {file} contain an empty access token");
     }
 
     Ok(token.trim().to_owned())
@@ -155,6 +158,7 @@ fn metric(
 struct CredentialsJson {
     #[serde(rename = "claudeAiOauth")]
     claude_ai_oauth: Option<ClaudeAiOauth>,
+    access_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,6 +357,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reads_an_access_token_from_a_cli_proxy_api_credentials_file() {
+        let path = temporary_path();
+        let credentials = CredentialSource::File(local_file(&path));
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "access_token": "proxy-token",
+                "refresh_token": "ignored",
+                "type": "claude"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            access_token(&credentials).await.unwrap(),
+            "proxy-token".to_owned()
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn reports_invalid_credentials_without_exposing_their_contents() {
         let path = temporary_path();
         let credentials = CredentialSource::File(local_file(&path));
@@ -363,7 +389,7 @@ mod tests {
             .expect_err("missing access token should fail");
         let message = format!("{error:#}");
 
-        assert!(message.contains("claudeAiOauth.accessToken"));
+        assert!(message.contains("claudeAiOauth.accessToken or access_token"));
         assert!(!message.contains("do-not-repeat"));
         fs::remove_file(path).unwrap();
     }

@@ -74,17 +74,19 @@ async fn managed_credentials(file: &CredentialsFile) -> Result<(String, Option<S
     let contents = file.read("Codex").await?;
     let credentials: CredentialsJson = serde_json::from_str(&contents)
         .with_context(|| format!("invalid Codex credentials in {file}"))?;
-    let tokens = credentials
-        .tokens
-        .with_context(|| format!("Codex credentials {file} do not contain tokens.access_token"))?;
+    let tokens = credentials.tokens.unwrap_or_default();
     let token = tokens
         .access_token
-        .with_context(|| format!("Codex credentials {file} do not contain tokens.access_token"))?;
+        .or(credentials.access_token)
+        .with_context(|| {
+            format!("Codex credentials {file} do not contain tokens.access_token or access_token")
+        })?;
     if token.trim().is_empty() {
-        bail!("Codex credentials {file} contain an empty tokens.access_token");
+        bail!("Codex credentials {file} contain an empty access token");
     }
     let account_id = tokens
         .account_id
+        .or(credentials.account_id)
         .map(|account_id| account_id.trim().to_owned())
         .filter(|account_id| !account_id.is_empty());
 
@@ -160,9 +162,11 @@ struct Identity {
 #[derive(Debug, Deserialize)]
 struct CredentialsJson {
     tokens: Option<ManagedTokens>,
+    access_token: Option<String>,
+    account_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct ManagedTokens {
     access_token: Option<String>,
     account_id: Option<String>,
@@ -315,6 +319,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reads_credentials_from_a_cli_proxy_api_credentials_file() {
+        let path = temporary_path();
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "access_token": "proxy-token",
+                "account_id": "proxy-account",
+                "refresh_token": "ignored",
+                "type": "codex"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            managed_credentials(&local_file(&path)).await.unwrap(),
+            ("proxy-token".to_owned(), Some("proxy-account".to_owned()))
+        );
+        fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn reports_invalid_credentials_without_exposing_their_contents() {
         let path = temporary_path();
         fs::write(&path, r#"{"secret":"do-not-repeat"}"#).unwrap();
@@ -324,7 +350,7 @@ mod tests {
             .expect_err("missing access token should fail");
         let message = format!("{error:#}");
 
-        assert!(message.contains("tokens.access_token"));
+        assert!(message.contains("tokens.access_token or access_token"));
         assert!(!message.contains("do-not-repeat"));
         fs::remove_file(path).unwrap();
     }

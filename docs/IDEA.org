@@ -66,8 +66,9 @@ Each account entry chooses exactly one credential source:
   credential file: an absolute local path, one starting with =~/=, or an
   scp-style ~host:path~ reference read over SSH. A relative remote path
   resolves against the remote home directory. The Claude Code provider
-  reads ~claudeAiOauth.accessToken~. The Codex provider reads
-  ~tokens.access_token~ and ~tokens.account_id~.
+  reads ~claudeAiOauth.accessToken~ or the top-level ~access_token~ used
+  by CLIProxyAPI. The Codex provider reads ~tokens.access_token~ and
+  ~tokens.account_id~, or their top-level CLIProxyAPI forms.
 
 The app never caches, refreshes, or modifies a managed credential file.
 The owning CLI handles refresh-token rotation, and the next run or watch
