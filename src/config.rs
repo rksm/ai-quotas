@@ -322,12 +322,17 @@ fn validate_accounts(service: Service, accounts: &[AccountConfig]) -> Result<()>
         }
         match (&account.env, &account.credentials_file) {
             (Some(_), None) => {}
-            (None, Some(file)) if matches!(service, Service::ClaudeCode | Service::Codex) => {
+            (None, Some(file))
+                if matches!(
+                    service,
+                    Service::ClaudeCode | Service::Codex | Service::Grok
+                ) =>
+            {
                 validate_credentials_file(service, &account.name, file)?;
             }
             (None, Some(_)) => {
                 bail!(
-                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code and codex",
+                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code, codex, and grok",
                     account.name
                 );
             }
@@ -553,6 +558,28 @@ services:
     }
 
     #[test]
+    fn accepts_credentials_file_for_grok() {
+        let config = Config::from_yaml(
+            r"
+services:
+  grok:
+    accounts:
+      - name: main
+        credentials_file: /home/example/.grok/auth.json
+",
+        )
+        .expect("Grok credentials file should be valid");
+
+        assert_eq!(
+            config.services[&Service::Grok].accounts[0].credentials_file,
+            Some(CredentialsFile {
+                host: None,
+                path: "/home/example/.grok/auth.json".to_owned(),
+            })
+        );
+    }
+
+    #[test]
     fn rejects_credentials_file_for_other_services() {
         let error = Config::from_yaml(
             r"
@@ -569,7 +596,7 @@ services:
         assert!(
             error
                 .to_string()
-                .contains("only supported by claude-code and codex")
+                .contains("only supported by claude-code, codex, and grok")
         );
     }
 

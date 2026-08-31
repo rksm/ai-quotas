@@ -2,6 +2,7 @@ mod claude_code;
 mod codex;
 mod deepgram;
 mod elevenlabs;
+mod grok;
 mod openai_api;
 mod runpod;
 
@@ -30,6 +31,7 @@ pub async fn fetch(client: &Client, account: &AccountTarget) -> Result<Vec<Metri
     match account.service {
         Service::ClaudeCode => claude_code::ClaudeCode.fetch(client, account).await,
         Service::Codex => codex::Codex.fetch(client, account).await,
+        Service::Grok => grok::Grok.fetch(client, account).await,
         Service::OpenaiApi => openai_api::OpenAiApi.fetch(client, account).await,
         Service::Deepgram => deepgram::Deepgram.fetch(client, account).await,
         Service::Elevenlabs => elevenlabs::ElevenLabs.fetch(client, account).await,

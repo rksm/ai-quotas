@@ -33,6 +33,7 @@ Three kinds of metrics exist, and every provider returns a list of them:
 |-------------+----------+----------------------------------------------------|
 | claude-code | 2 (Max)  | 5h window, 7d window, Fable weekly window          |
 | codex       | 1        | 7d window                                          |
+| grok        | 1        | weekly credits window                              |
 | openai-api  | 1        | UTC month spend, estimated balance, limit headroom |
 | deepgram    | 1        | prepaid balance                                    |
 | elevenlabs  | 1        | credits remaining (count / limit)                  |
@@ -48,8 +49,9 @@ Per provider, decided at implementation time:
 1. *API first*: direct HTTPS calls from Rust when an endpoint works for the
    given app, quota type, and login method. For claude-code this is the
    OAuth-authenticated usage endpoint that powers the ~/usage~ screen. For
-   codex it is the ChatGPT backend rate-limit endpoint. For openai-api it is
-   the organization Costs API and optional hard spend-limit endpoint.
+   codex it is the ChatGPT backend rate-limit endpoint. For grok it is the
+   Grok CLI billing endpoint. For openai-api it is the organization Costs
+   API and optional hard spend-limit endpoint.
 2. *CLI fallback*: spawn the vendor CLI with the account's env injected and
    parse its output, only where no workable API route exists.
 
@@ -62,13 +64,15 @@ Each account entry chooses exactly one credential source:
 
 - ~env~ contains literal values. The provider either reads the variables
   directly or injects them into a subprocess for a CLI fallback.
-- Claude Code and Codex support ~credentials_file~. It names a managed
+- Claude Code, Codex, and Grok support ~credentials_file~. It names a managed
   credential file: an absolute local path, one starting with =~/=, or an
   scp-style ~host:path~ reference read over SSH. A relative remote path
   resolves against the remote home directory. The Claude Code provider
   reads ~claudeAiOauth.accessToken~ or the top-level ~access_token~ used
   by CLIProxyAPI. The Codex provider reads ~tokens.access_token~ and
-  ~tokens.account_id~, or their top-level CLIProxyAPI forms.
+  ~tokens.account_id~, or their top-level CLIProxyAPI forms. The Grok
+  provider reads an account entry's ~key~ or CLIProxyAPI's top-level
+  ~access_token~.
 
 The app never caches, refreshes, or modifies a managed credential file.
 The owning CLI handles refresh-token rotation, and the next run or watch
@@ -122,6 +126,10 @@ services:
     accounts:
       - name: main
         credentials_file: ~/.codex/auth.json
+  grok:
+    accounts:
+      - name: main
+        credentials_file: ~/.grok/auth.json
   openai-api:
     accounts:
       - name: main
@@ -182,6 +190,8 @@ claude-code  work
   5h             3% ░░░░░░░░  resets 14:00 (in 2h 10m)
 codex        main
   7d            55% ████░░░░  resets Fri 12:00 (in 2d 22h)
+grok         main
+  7d             1% ░░░░░░░░  resets Mon 14:42 (in 5d 1h)
 openai-api   main
   est-balance   $19.42 remaining
   month-spend   $9.20 spent

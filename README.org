@@ -57,18 +57,21 @@ credential files. Restrict its filesystem permissions accordingly.
 | codex       | ~credentials_file~                                | Codex: ~tokens.access_token~ and optional ~tokens.account_id~. CLIProxyAPI: the same fields at the top level. |
 | codex       | ~CODEX_OAUTH_TOKEN~, optional ~CODEX_ACCOUNT_ID~  | The managed-login access token. Set the account ID for reliable routing when the login belongs to multiple workspaces. |
 | codex       | ~CODEX_ACCESS_TOKEN~                              | An ~at-~ personal access token. The CLI discovers its ChatGPT account ID. |
+| grok        | ~credentials_file~                                | Grok CLI: an account entry with ~key~. CLIProxyAPI: top-level ~access_token~. |
+| grok        | ~env.GROK_OAUTH_TOKEN~                            | A Grok OAuth access token. |
 | deepgram    | ~DEEPGRAM_API_KEY~                                | A project-scoped key with ~project:read~ and ~billing:read~. |
 | elevenlabs  | ~ELEVENLABS_API_KEY~                              | A key that can read the user subscription, normally with ~user_read~. |
 | runpod      | ~RUNPOD_API_KEY~                                  | A Runpod API key permitted to read GraphQL account data. |
 | openai-api  | ~OPENAI_ADMIN_KEY~                                | An organization Admin API key. The provider reads current UTC month costs and an optional hard spend limit. |
 
 Each account must configure exactly one of ~env~ or ~credentials_file~.
-Claude Code and Codex support credential files. A local path must be
+Claude Code, Codex, and Grok support credential files. A local path must be
 absolute or start with =~/=. The provider rereads the file for every
 fetch, so it picks up tokens refreshed by the owning CLI on the next run or
 watch interval. ~ai-quotas~ never modifies or refreshes the file.
-CLIProxyAPI auth files store ~access_token~ at the top level. Codex auth
-files can also store ~account_id~ at the top level.
+CLIProxyAPI auth files store ~access_token~ at the top level. Grok CLI auth
+files store ~key~ inside an account entry. Codex auth files can also store
+~account_id~ at the top level.
 
 A credential file can also live on another machine. An scp-style reference
 such as ~agent-1:.claude/.credentials.json~ reads the file over SSH on
@@ -80,6 +83,9 @@ host must authenticate through keys or an agent.
 Codex stores its managed credentials in ~~/.codex/auth.json~ by default.
 For separate Codex homes, point each account at the corresponding
 ~auth.json~ file.
+
+Grok stores its managed credentials in ~~/.grok/auth.json~ by default. The
+provider reports the weekly credits window from the Grok billing service.
 
 Claude Code stores managed credentials in the macOS Keychain rather than a
 JSON file. Use the environment-token source on macOS.

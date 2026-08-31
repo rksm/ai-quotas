@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub enum Service {
     ClaudeCode,
     Codex,
+    Grok,
     OpenaiApi,
     Deepgram,
     Elevenlabs,
@@ -21,6 +22,7 @@ impl fmt::Display for Service {
         formatter.pad(match self {
             Self::ClaudeCode => "claude-code",
             Self::Codex => "codex",
+            Self::Grok => "grok",
             Self::OpenaiApi => "openai-api",
             Self::Deepgram => "deepgram",
             Self::Elevenlabs => "elevenlabs",
