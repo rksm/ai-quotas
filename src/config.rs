@@ -325,14 +325,14 @@ fn validate_accounts(service: Service, accounts: &[AccountConfig]) -> Result<()>
             (None, Some(file))
                 if matches!(
                     service,
-                    Service::ClaudeCode | Service::Codex | Service::Grok
+                    Service::ClaudeCode | Service::Codex | Service::Grok | Service::Openrouter
                 ) =>
             {
                 validate_credentials_file(service, &account.name, file)?;
             }
             (None, Some(_)) => {
                 bail!(
-                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code, codex, and grok",
+                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code, codex, grok, and openrouter",
                     account.name
                 );
             }
@@ -580,6 +580,33 @@ services:
     }
 
     #[test]
+    fn accepts_openrouter_accounts() {
+        let config = Config::from_yaml(
+            r"
+services:
+  openrouter:
+    accounts:
+      - name: direct
+        env:
+          OPENROUTER_MANAGEMENT_KEY: secret
+      - name: file
+        credentials_file: /home/example/.config/openrouter/management-key
+",
+        )
+        .expect("OpenRouter accounts should be valid");
+
+        let accounts = &config.services[&Service::Openrouter].accounts;
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(
+            accounts[1].credentials_file,
+            Some(CredentialsFile {
+                host: None,
+                path: "/home/example/.config/openrouter/management-key".to_owned(),
+            })
+        );
+    }
+
+    #[test]
     fn rejects_credentials_file_for_other_services() {
         let error = Config::from_yaml(
             r"
@@ -596,7 +623,7 @@ services:
         assert!(
             error
                 .to_string()
-                .contains("only supported by claude-code, codex, and grok")
+                .contains("only supported by claude-code, codex, grok, and openrouter")
         );
     }
 

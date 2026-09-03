@@ -45,7 +45,7 @@ To consume the package from another flake:
 }
 #+END_SRC
 
-The configuration can contain literal credentials or paths to managed
+The configuration can contain literal credentials or paths to
 credential files. Restrict its filesystem permissions accordingly.
 
 * Credential requirements
@@ -63,12 +63,14 @@ credential files. Restrict its filesystem permissions accordingly.
 | elevenlabs  | ~ELEVENLABS_API_KEY~                              | A key that can read the user subscription, normally with ~user_read~. |
 | runpod      | ~RUNPOD_API_KEY~                                  | A Runpod API key permitted to read GraphQL account data. |
 | openai-api  | ~OPENAI_ADMIN_KEY~                                | An organization Admin API key. The provider reads current UTC month costs and an optional hard spend limit. |
+| openrouter  | ~env.OPENROUTER_MANAGEMENT_KEY~                    | An OpenRouter management key. |
+| openrouter  | ~credentials_file~                                | A file that contains only the raw OpenRouter management key. |
 
 Each account must configure exactly one of ~env~ or ~credentials_file~.
-Claude Code, Codex, and Grok support credential files. A local path must be
-absolute or start with =~/=. The provider rereads the file for every
-fetch, so it picks up tokens refreshed by the owning CLI on the next run or
-watch interval. ~ai-quotas~ never modifies or refreshes the file.
+Claude Code, Codex, Grok, and OpenRouter support credential files. A local
+path must be absolute or start with =~/=. The provider rereads the file for
+every fetch. ~ai-quotas~ never modifies or refreshes it. OpenRouter files
+contain the raw management key. The provider ignores surrounding whitespace.
 CLIProxyAPI auth files store ~access_token~ at the top level. Grok CLI auth
 files store ~key~ inside an account entry. Codex auth files can also store
 ~account_id~ at the top level.
@@ -89,6 +91,25 @@ provider reports the weekly credits window from the Grok billing service.
 
 Claude Code stores managed credentials in the macOS Keychain rather than a
 JSON file. Use the environment-token source on macOS.
+
+OpenRouter reports the live USD credit balance and spend for the last 1, 7,
+and 30 completed UTC days. The [[https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits][credits endpoint]] and
+[[https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity-grouped-by-endpoint][activity endpoint]] both require a management key:
+
+#+BEGIN_SRC yaml
+services:
+  openrouter:
+    accounts:
+      - name: personal
+        env:
+          OPENROUTER_MANAGEMENT_KEY: sk-or-v1-...
+      - name: work
+        credentials_file: ~/.config/openrouter/management-key
+#+END_SRC
+
+OpenRouter may expire unused credits after one year, but its API does not
+return credit purchase or expiration dates. The output cannot show those
+dates. See the [[https://openrouter.ai/docs/faq][OpenRouter FAQ]].
 
 The OpenAI administration API exposes costs and spend limits, not remaining
 prepaid credit. The provider reports current UTC calendar-month spend. If

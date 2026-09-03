@@ -4,6 +4,7 @@ mod deepgram;
 mod elevenlabs;
 mod grok;
 mod openai_api;
+mod openrouter;
 mod runpod;
 
 use std::collections::BTreeMap;
@@ -33,6 +34,7 @@ pub async fn fetch(client: &Client, account: &AccountTarget) -> Result<Vec<Metri
         Service::Codex => codex::Codex.fetch(client, account).await,
         Service::Grok => grok::Grok.fetch(client, account).await,
         Service::OpenaiApi => openai_api::OpenAiApi.fetch(client, account).await,
+        Service::Openrouter => openrouter::OpenRouter.fetch(client, account).await,
         Service::Deepgram => deepgram::Deepgram.fetch(client, account).await,
         Service::Elevenlabs => elevenlabs::ElevenLabs.fetch(client, account).await,
         Service::Runpod => runpod::Runpod.fetch(client, account).await,
