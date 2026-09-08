@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use chrono::{NaiveDate, Utc};
+use chrono::{NaiveDate, NaiveDateTime, Utc};
 use reqwest::header::ACCEPT;
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
@@ -83,9 +83,14 @@ fn metrics(
         if !item.usage.is_finite() || item.usage < 0.0 {
             bail!("OpenRouter returned invalid activity usage");
         }
-        let date = NaiveDate::parse_from_str(&item.date, "%Y-%m-%d").with_context(|| {
-            format!("OpenRouter returned invalid activity date {:?}", item.date)
-        })?;
+        let date = NaiveDate::parse_from_str(&item.date, "%Y-%m-%d")
+            .or_else(|_| {
+                NaiveDateTime::parse_from_str(&item.date, "%Y-%m-%d %H:%M:%S")
+                    .map(|timestamp| timestamp.date())
+            })
+            .with_context(|| {
+                format!("OpenRouter returned invalid activity date {:?}", item.date)
+            })?;
         let age = today.signed_duration_since(date).num_days();
         for (index, (days, _)) in SPEND_PERIODS.iter().enumerate() {
             if (1..=*days).contains(&age) {
@@ -165,12 +170,12 @@ mod tests {
         .unwrap();
         let activity: ActivityResponse = serde_json::from_value(json!({
             "data": [
-                {"date": "2026-09-02", "usage": 1.0},
-                {"date": "2026-08-31", "usage": 2.0},
-                {"date": "2026-08-26", "usage": 4.0},
-                {"date": "2026-08-04", "usage": 8.0},
-                {"date": "2026-08-03", "usage": 16.0},
-                {"date": "2026-09-03", "usage": 32.0}
+                {"date": "2026-09-07 00:00:00", "usage": 1.0},
+                {"date": "2026-09-05", "usage": 2.0},
+                {"date": "2026-08-31 00:00:00", "usage": 4.0},
+                {"date": "2026-08-09 00:00:00", "usage": 8.0},
+                {"date": "2026-08-08", "usage": 16.0},
+                {"date": "2026-09-08 00:00:00", "usage": 32.0}
             ]
         }))
         .unwrap();
@@ -179,7 +184,7 @@ mod tests {
             metrics(
                 credits,
                 activity,
-                NaiveDate::from_ymd_opt(2026, 9, 3).unwrap()
+                NaiveDate::from_ymd_opt(2026, 9, 8).unwrap()
             )
             .unwrap(),
             vec![
@@ -195,6 +200,36 @@ mod tests {
                 cost("30d-spend", 15.0),
             ]
         );
+    }
+
+    #[test]
+    fn rejects_invalid_activity_dates() {
+        for date in [
+            "2026-02-30 00:00:00",
+            "2026-09-07 24:00:00",
+            "2026-09-07 garbage",
+            "2026-09-07 00:00:00 garbage",
+        ] {
+            let credits: CreditsResponse = serde_json::from_value(json!({
+                "data": {"total_credits": 100.0, "total_usage": 25.0}
+            }))
+            .unwrap();
+            let activity: ActivityResponse = serde_json::from_value(json!({
+                "data": [{"date": date, "usage": 1.0}]
+            }))
+            .unwrap();
+
+            let error = metrics(
+                credits,
+                activity,
+                NaiveDate::from_ymd_opt(2026, 9, 8).unwrap(),
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!("OpenRouter returned invalid activity date {date:?}")
+            );
+        }
     }
 
     #[test]
