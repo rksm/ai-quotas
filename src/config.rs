@@ -184,6 +184,7 @@ struct RawServiceConfig {
 struct ThresholdOverrides {
     quota_warn: Option<f64>,
     quota_critical: Option<f64>,
+    balance_warn: Option<f64>,
     balance_critical: Option<f64>,
 }
 
@@ -207,7 +208,9 @@ impl Config {
             .into_iter()
             .map(|(service, raw_service)| {
                 validate_accounts(service, &raw_service.accounts)?;
-                let thresholds = raw_service.thresholds.apply(global_thresholds);
+                let thresholds = raw_service
+                    .thresholds
+                    .apply(raw.thresholds.apply(Thresholds::for_service(service)));
                 validate_thresholds(thresholds, &format!("services.{service}.thresholds"))?;
 
                 Ok((
@@ -285,6 +288,7 @@ impl ThresholdOverrides {
         Thresholds {
             quota_warn: self.quota_warn.unwrap_or(base.quota_warn),
             quota_critical: self.quota_critical.unwrap_or(base.quota_critical),
+            balance_warn: self.balance_warn.unwrap_or(base.balance_warn),
             balance_critical: self.balance_critical.unwrap_or(base.balance_critical),
         }
     }
@@ -409,6 +413,9 @@ fn validate_thresholds(thresholds: Thresholds, location: &str) -> Result<()> {
     if !thresholds.balance_critical.is_finite() || thresholds.balance_critical < 0.0 {
         bail!("{location}.balance_critical must be zero or greater");
     }
+    if !thresholds.balance_warn.is_finite() || thresholds.balance_warn < 0.0 {
+        bail!("{location}.balance_warn must be zero or greater");
+    }
 
     Ok(())
 }
@@ -416,11 +423,12 @@ fn validate_thresholds(thresholds: Thresholds, location: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{Config, CredentialsFile, ssh_read_args};
-    use crate::model::Service;
+    use crate::model::{Level, Metric, Service};
 
     const CONFIG: &str = r"
 thresholds:
   quota_warn: 75
+  balance_warn: 20
 services:
   claude-code:
     accounts:
@@ -431,6 +439,7 @@ services:
         credentials_file: /home/example/.claude-work/.credentials.json
   deepgram:
     thresholds:
+      balance_warn: 30
       balance_critical: 25
     accounts:
       - name: main
@@ -453,7 +462,10 @@ services:
         assert_close(claude.thresholds.quota_warn, 75.0);
         assert_close(claude.thresholds.quota_critical, 90.0);
         assert_close(claude.thresholds.balance_critical, 10.0);
+        assert_close(claude.thresholds.balance_warn, 20.0);
+        assert_close(deepgram.thresholds.balance_warn, 30.0);
         assert_close(deepgram.thresholds.balance_critical, 25.0);
+        assert_close(runpod.thresholds.balance_warn, 20.0);
         assert_close(runpod.thresholds.balance_critical, 10.0);
         assert_eq!(claude.accounts[0].name, "personal");
         assert_eq!(
@@ -463,6 +475,66 @@ services:
                 path: "/home/example/.claude-work/.credentials.json".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn evaluates_default_balance_colors_at_boundaries() {
+        for (service, label, currency, warn, critical, limit) in [
+            (Service::OpenaiApi, "est-balance", "USD", 10.0, 5.0, None),
+            (Service::Openrouter, "balance", "USD", 10.0, 5.0, None),
+            (Service::Deepgram, "balance", "USD", 15.0, 10.0, None),
+            (Service::Runpod, "balance", "USD", 15.0, 10.0, None),
+            (
+                Service::Elevenlabs,
+                "credits",
+                "credits",
+                30_000.0,
+                10_000.0,
+                Some(500_000.0),
+            ),
+        ] {
+            let config = Config::from_yaml(&format!(
+                "services:\n  {service}:\n    accounts:\n      - name: main\n        env: {{}}\n"
+            ))
+            .unwrap();
+            let target = config.select(&[], &[]).unwrap().remove(0);
+            for (amount, expected) in [
+                (warn, Level::Ok),
+                (warn - 0.001, Level::Warn),
+                (critical, Level::Warn),
+                (critical - 0.001, Level::Critical),
+                (0.0, Level::Critical),
+            ] {
+                let metric = Metric::Balance {
+                    label: label.to_owned(),
+                    amount,
+                    currency: currency.to_owned(),
+                    used: limit.map(|limit| limit - amount),
+                    limit,
+                };
+                assert_eq!(
+                    target.thresholds.evaluate(metric).level,
+                    expected,
+                    "{service}: {amount}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_balance_warning_thresholds() {
+        for value in ["-1", ".nan", ".inf"] {
+            let error = Config::from_yaml(&format!(
+                "thresholds:\n  balance_warn: {value}\nservices:\n  runpod:\n    accounts:\n      - name: main\n        env: {{}}\n"
+            ))
+            .err()
+            .expect("invalid balance warning should fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("balance_warn must be zero or greater")
+            );
+        }
     }
 
     #[test]

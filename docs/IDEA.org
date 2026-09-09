@@ -126,7 +126,9 @@ output and JSON.
 thresholds:            # optional, defaults built in
   quota_warn: 70       # percent used -> yellow
   quota_critical: 90   # percent used -> red
-  balance_critical: 10.0   # currency units -> red
+  # Optional global overrides, in currency units or credits:
+  # balance_warn: 15.0     # remaining amount -> yellow
+  # balance_critical: 10.0 # remaining amount -> red
 
 services:
   claude-code:
@@ -178,9 +180,21 @@ services:
           RUNPOD_API_KEY: ...
 #+END_SRC
 
-Threshold defaults: quotas turn yellow at 70% used and red at 90%. Balances
-turn red below $10. ElevenLabs credits turn red below 10% of the plan limit
-(the limit is known there).
+Quota windows turn yellow at 70% used and red at 90%. Balance defaults:
+
+| Item                     | Yellow below | Red below |
+|--------------------------+--------------+-----------|
+| ~openai-api.est-balance~  |          $10 |        $5 |
+| ~openrouter.balance~     |          $10 |        $5 |
+| ~deepgram.balance~       |          $15 |       $10 |
+| ~elevenlabs.credits~     |       30,000 |    10,000 |
+| ~runpod.balance~         |          $15 |       $10 |
+
+Red takes precedence over yellow. Global ~thresholds~ override these
+defaults. Per-service ~thresholds~ override global values. Balance
+thresholds use remaining currency units or credits. OpenAI ~spend-limit~
+headroom still turns red below 10% of its limit, or when a zero limit has
+no headroom left.
 
 * CLI surface
 

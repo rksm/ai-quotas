@@ -37,6 +37,7 @@ impl fmt::Display for Service {
 pub struct Thresholds {
     pub quota_warn: f64,
     pub quota_critical: f64,
+    pub balance_warn: f64,
     pub balance_critical: f64,
 }
 
@@ -45,12 +46,27 @@ impl Default for Thresholds {
         Self {
             quota_warn: 70.0,
             quota_critical: 90.0,
+            balance_warn: 15.0,
             balance_critical: 10.0,
         }
     }
 }
 
 impl Thresholds {
+    #[must_use]
+    pub fn for_service(service: Service) -> Self {
+        let (balance_warn, balance_critical) = match service {
+            Service::OpenaiApi | Service::Openrouter => (10.0, 5.0),
+            Service::Elevenlabs => (30_000.0, 10_000.0),
+            _ => return Self::default(),
+        };
+        Self {
+            balance_warn,
+            balance_critical,
+            ..Self::default()
+        }
+    }
+
     #[must_use]
     pub fn evaluate(self, metric: Metric) -> EvaluatedMetric {
         let level = match &metric {
@@ -63,15 +79,22 @@ impl Thresholds {
                     Level::Ok
                 }
             }
-            Metric::Balance { amount, limit, .. } => {
-                if let Some(limit) = limit {
-                    if (*limit > 0.0 && amount / limit < 0.1) || (*limit <= 0.0 && *amount <= 0.0) {
+            Metric::Balance {
+                amount,
+                currency,
+                limit,
+                ..
+            } => {
+                if let Some(limit) = limit.filter(|_| currency != "credits") {
+                    if (limit > 0.0 && amount / limit < 0.1) || (limit <= 0.0 && *amount <= 0.0) {
                         Level::Critical
                     } else {
                         Level::Ok
                     }
                 } else if *amount < self.balance_critical {
                     Level::Critical
+                } else if *amount < self.balance_warn {
+                    Level::Warn
                 } else {
                     Level::Ok
                 }
@@ -144,7 +167,12 @@ mod tests {
             thresholds.evaluate(balance(9.999, None)).level,
             Level::Critical
         );
-        assert_eq!(thresholds.evaluate(balance(10.0, None)).level, Level::Ok);
+        assert_eq!(thresholds.evaluate(balance(10.0, None)).level, Level::Warn);
+        assert_eq!(
+            thresholds.evaluate(balance(14.999, None)).level,
+            Level::Warn
+        );
+        assert_eq!(thresholds.evaluate(balance(15.0, None)).level, Level::Ok);
     }
 
     #[test]
