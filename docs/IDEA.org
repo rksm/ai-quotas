@@ -36,6 +36,7 @@ Three kinds of metrics exist, and every provider returns a list of them:
 | grok        | 1        | weekly credits window                              |
 | openai-api  | 1        | UTC month spend, estimated balance, limit headroom |
 | openrouter  | 1        | balance and 1d, 7d, and 30d spend                  |
+| assemblyai  | 1        | prepaid balance                                    |
 | deepgram    | 1        | prepaid balance                                    |
 | elevenlabs  | 1        | credits remaining (count / limit)                  |
 | runpod      | 1        | prepaid balance                                    |
@@ -53,7 +54,9 @@ Per provider, decided at implementation time:
    codex it is the ChatGPT backend rate-limit endpoint. For grok it is the
    Grok CLI billing endpoint. For openai-api it is the organization Costs
    API and optional hard spend-limit endpoint. For OpenRouter it is the
-   credits and activity endpoints.
+   credits and activity endpoints. For AssemblyAI it is the undocumented
+   balance endpoint behind the dashboard Billing page. It needs a browser
+   login session because the AssemblyAI API has no balance endpoint.
 2. *CLI fallback*: spawn the vendor CLI with the account's env injected and
    parse its output, only where no workable API route exists.
 
@@ -66,15 +69,18 @@ Each account entry chooses exactly one credential source:
 
 - ~env~ contains literal values. The provider either reads the variables
   directly or injects them into a subprocess for a CLI fallback.
-- Claude Code, Codex, Grok, and OpenRouter support ~credentials_file~. It
-  names a credential file: an absolute local path, one starting with =~/=,
-  or an scp-style ~host:path~ reference read over SSH. A relative remote
-  path resolves against the remote home directory. The Claude Code provider
-  reads ~claudeAiOauth.accessToken~ or the top-level ~access_token~ used by
-  CLIProxyAPI. The Codex provider reads ~tokens.access_token~ and
-  ~tokens.account_id~, or their top-level CLIProxyAPI forms. The Grok
-  provider reads an account entry's ~key~ or CLIProxyAPI's top-level
-  ~access_token~. An OpenRouter file contains the raw management key.
+- Claude Code, Codex, Grok, OpenRouter, and AssemblyAI support
+  ~credentials_file~. It names a credential file: an absolute local path,
+  one starting with =~/=, or an scp-style ~host:path~ reference read over
+  SSH. A relative remote path resolves against the remote home directory.
+  The Claude Code provider reads ~claudeAiOauth.accessToken~ or the
+  top-level ~access_token~ used by CLIProxyAPI. The Codex provider reads
+  ~tokens.access_token~ and ~tokens.account_id~, or their top-level
+  CLIProxyAPI forms. The Grok provider reads an account entry's ~key~ or
+  CLIProxyAPI's top-level ~access_token~. An OpenRouter file contains the raw management key. An
+  AssemblyAI file contains the raw ~Cookie~ header of a dashboard login
+  session. Nothing refreshes that session, so the user copies a fresh
+  header after it expires.
 
 The app never caches, refreshes, or modifies a credential file. For
 CLI-managed files, the owning CLI handles refresh-token rotation. The next
@@ -161,6 +167,10 @@ services:
           OPENROUTER_MANAGEMENT_KEY: sk-or-v1-...
       - name: work
         credentials_file: ~/.config/openrouter/management-key
+  assemblyai:
+    accounts:
+      - name: main
+        credentials_file: ~/.config/assemblyai/dashboard-cookie
   deepgram:
     thresholds:              # per-service override
       balance_critical: 25.0
@@ -186,6 +196,7 @@ Quota windows turn yellow at 70% used and red at 90%. Balance defaults:
 |--------------------------+--------------+-----------|
 | ~openai-api.est-balance~  |          $10 |        $5 |
 | ~openrouter.balance~     |          $10 |        $5 |
+| ~assemblyai.balance~     |          $15 |       $10 |
 | ~deepgram.balance~       |          $15 |       $10 |
 | ~elevenlabs.credits~     |       30,000 |    10,000 |
 | ~runpod.balance~         |          $15 |       $10 |
@@ -234,6 +245,8 @@ openrouter    main
   1d-spend      $0.40 spent
   7d-spend      $3.10 spent
   30d-spend     $11.25 spent
+assemblyai   main
+  balance       $37.20 remaining
 deepgram     main
   balance       $102.10 remaining
 elevenlabs   main

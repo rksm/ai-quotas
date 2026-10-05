@@ -329,14 +329,18 @@ fn validate_accounts(service: Service, accounts: &[AccountConfig]) -> Result<()>
             (None, Some(file))
                 if matches!(
                     service,
-                    Service::ClaudeCode | Service::Codex | Service::Grok | Service::Openrouter
+                    Service::ClaudeCode
+                        | Service::Codex
+                        | Service::Grok
+                        | Service::Openrouter
+                        | Service::Assemblyai
                 ) =>
             {
                 validate_credentials_file(service, &account.name, file)?;
             }
             (None, Some(_)) => {
                 bail!(
-                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code, codex, grok, and openrouter",
+                    "services.{service}.accounts entry {:?} uses credentials_file, which is only supported by claude-code, codex, grok, openrouter, and assemblyai",
                     account.name
                 );
             }
@@ -482,6 +486,7 @@ services:
         for (service, label, currency, warn, critical, limit) in [
             (Service::OpenaiApi, "est-balance", "USD", 10.0, 5.0, None),
             (Service::Openrouter, "balance", "USD", 10.0, 5.0, None),
+            (Service::Assemblyai, "balance", "USD", 15.0, 10.0, None),
             (Service::Deepgram, "balance", "USD", 15.0, 10.0, None),
             (Service::Runpod, "balance", "USD", 15.0, 10.0, None),
             (
@@ -695,7 +700,7 @@ services:
         assert!(
             error
                 .to_string()
-                .contains("only supported by claude-code, codex, grok, and openrouter")
+                .contains("only supported by claude-code, codex, grok, openrouter, and assemblyai")
         );
     }
 

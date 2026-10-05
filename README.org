@@ -65,12 +65,16 @@ credential files. Restrict its filesystem permissions accordingly.
 | openai-api  | ~OPENAI_ADMIN_KEY~                                | An organization Admin API key. The provider reads current UTC month costs and an optional hard spend limit. |
 | openrouter  | ~env.OPENROUTER_MANAGEMENT_KEY~                    | An OpenRouter management key. |
 | openrouter  | ~credentials_file~                                | A file that contains only the raw OpenRouter management key. |
+| assemblyai  | ~credentials_file~                                | A file that contains only the ~Cookie~ header of a dashboard login session. |
+| assemblyai  | ~env.ASSEMBLYAI_DASHBOARD_COOKIE~                 | The ~Cookie~ header of a dashboard login session. |
 
 Each account must configure exactly one of ~env~ or ~credentials_file~.
-Claude Code, Codex, Grok, and OpenRouter support credential files. A local
-path must be absolute or start with =~/=. The provider rereads the file for
-every fetch. ~ai-quotas~ never modifies or refreshes it. OpenRouter files
-contain the raw management key. The provider ignores surrounding whitespace.
+Claude Code, Codex, Grok, OpenRouter, and AssemblyAI support credential
+files. A local path must be absolute or start with =~/=. The provider
+rereads the file for every fetch. ~ai-quotas~ never modifies or refreshes
+it. OpenRouter files contain the raw management key. AssemblyAI files
+contain the raw ~Cookie~ header. The provider ignores surrounding
+whitespace in both.
 CLIProxyAPI auth files store ~access_token~ at the top level. Grok CLI auth
 files store ~key~ inside an account entry. Codex auth files can also store
 ~account_id~ at the top level.
@@ -110,6 +114,34 @@ services:
 OpenRouter may expire unused credits after one year, but its API does not
 return credit purchase or expiration dates. The output cannot show those
 dates. See the [[https://openrouter.ai/docs/faq][OpenRouter FAQ]].
+
+AssemblyAI reports the USD account balance shown on the dashboard Billing
+page. The AssemblyAI API has no balance endpoint, and an API key cannot read
+the balance. The provider calls the undocumented endpoint behind the Billing
+page instead. That endpoint needs the ~Cookie~ header of a browser login
+session:
+
+1. Log in to the [[https://www.assemblyai.com/dashboard][AssemblyAI dashboard]].
+2. Open *Workspace* > *Settings* > *Billing*.
+3. Open the browser developer tools and select the *Network* tab.
+4. Reload the page.
+5. Select the ~balance~ request.
+6. Copy the value of its ~cookie~ request header.
+7. Save the value in a file that only your user can read.
+
+Point the account at that file:
+
+#+BEGIN_SRC yaml
+services:
+  assemblyai:
+    accounts:
+      - name: main
+        credentials_file: ~/.config/assemblyai/dashboard-cookie
+#+END_SRC
+
+The login session expires after some time. The provider then reports an
+expired credential. Log in again and copy a fresh ~cookie~ header.
+AssemblyAI can change or remove the endpoint without notice.
 
 The OpenAI administration API exposes costs and spend limits, not remaining
 prepaid credit. The provider reports current UTC calendar-month spend. If
