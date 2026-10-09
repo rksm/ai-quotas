@@ -4,7 +4,7 @@ use reqwest::header::ACCEPT;
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 
-use super::{Provider, USER_AGENT, credential, response_json};
+use super::{Provider, USER_AGENT, raw_credential, response_json};
 use crate::config::{AccountTarget, CredentialSource};
 use crate::model::Metric;
 
@@ -25,7 +25,7 @@ async fn fetch_from(
     credentials: &CredentialSource,
     base_url: &str,
 ) -> Result<Vec<Metric>> {
-    let token = management_key(credentials).await?;
+    let token = raw_credential("OpenRouter", TOKEN_VARIABLE, credentials).await?;
     let credits = api_request(client, base_url, &token, "credits")
         .send()
         .await
@@ -41,20 +41,6 @@ async fn fetch_from(
         response_json("OpenRouter", "key must be a management key", activity).await?;
 
     metrics(credits, activity, Utc::now().date_naive())
-}
-
-async fn management_key(credentials: &CredentialSource) -> Result<String> {
-    match credentials {
-        CredentialSource::Env(env) => credential(env, TOKEN_VARIABLE).map(str::to_owned),
-        CredentialSource::File(file) => {
-            let contents = file.read("OpenRouter").await?;
-            let token = contents.trim();
-            if token.is_empty() {
-                bail!("OpenRouter credentials {file} are empty");
-            }
-            Ok(token.to_owned())
-        }
-    }
 }
 
 fn api_request(client: &Client, base_url: &str, token: &str, endpoint: &str) -> RequestBuilder {
@@ -147,20 +133,12 @@ struct Activity {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
-
     use chrono::NaiveDate;
     use reqwest::Client;
     use serde_json::json;
 
-    use super::{ActivityResponse, CreditsResponse, api_request, management_key, metrics};
-    use crate::config::{CredentialSource, CredentialsFile};
+    use super::{ActivityResponse, CreditsResponse, api_request, metrics};
     use crate::model::Metric;
-
-    static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn computes_the_balance_and_completed_utc_day_spend() {
@@ -248,50 +226,11 @@ mod tests {
         assert_eq!(request.headers()["accept"], "application/json");
     }
 
-    #[tokio::test]
-    async fn reads_a_raw_management_key_file() {
-        let path = temporary_path();
-        fs::write(&path, "management-key\n").unwrap();
-
-        assert_eq!(
-            management_key(&CredentialSource::File(local_file(&path)))
-                .await
-                .unwrap(),
-            "management-key"
-        );
-        fs::remove_file(path).unwrap();
-    }
-
-    #[tokio::test]
-    async fn reads_a_management_key_from_the_environment_source() {
-        let credentials = CredentialSource::Env(BTreeMap::from([(
-            "OPENROUTER_MANAGEMENT_KEY".to_owned(),
-            "management-key".to_owned(),
-        )]));
-
-        assert_eq!(
-            management_key(&credentials).await.unwrap(),
-            "management-key"
-        );
-    }
-
     fn cost(label: &str, amount: f64) -> Metric {
         Metric::Cost {
             label: label.to_owned(),
             amount,
             currency: "USD".to_owned(),
         }
-    }
-
-    fn local_file(path: &Path) -> CredentialsFile {
-        CredentialsFile::from(path.to_str().unwrap().to_owned())
-    }
-
-    fn temporary_path() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "ai-quotas-openrouter-credentials-{}-{}",
-            std::process::id(),
-            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
-        ))
     }
 }
